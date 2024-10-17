@@ -1,0 +1,16 @@
+[package]
+name = "dual-quat"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.83"
+mimalloc = "0.1.43"
+rerun = "0.18.2"
+re_crash_handler = "0.18.2"
+re_memory = "0.18.2"
+re_sdk = "0.18.2"
+re_sdk_comms = { version = "0.18.2", features = ["server"] }
+re_viewer = "=0.18.2"
+tracing = "0.1.37"
+nalgebra = "0.32.5"                
