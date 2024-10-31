@@ -1,16 +1,51 @@
-use na::{DualQuaternion, Quaternion, UnitDualQuaternion, UnitQuaternion, Vector3};
+use na::{
+    DualQuaternion, Matrix3, Normed, Quaternion, UnitDualQuaternion, UnitQuaternion, Vector3,
+};
 use nalgebra as na;
 
-const ROTOR_ARM1: Vector3<f64> = Vector3::<f64>::new(0.1, 0.1, 0.0);
-const ROTOR_ARM2: Vector3<f64> = Vector3::<f64>::new(0.1, -0.1, 0.0);
-const ROTOR_ARM3: Vector3<f64> = Vector3::<f64>::new(-0.1, 0.1, 0.0);
-const ROTOR_ARM4: Vector3<f64> = Vector3::<f64>::new(-0.1, -0.1, 0.0);
+pub const ROTOR_ARM1: Vector3<f64> = Vector3::<f64>::new(0.1, 0.1, 0.0);
+pub const ROTOR_ARM2: Vector3<f64> = Vector3::<f64>::new(0.1, -0.1, 0.0);
+pub const ROTOR_ARM3: Vector3<f64> = Vector3::<f64>::new(-0.1, 0.1, 0.0);
+pub const ROTOR_ARM4: Vector3<f64> = Vector3::<f64>::new(-0.1, -0.1, 0.0);
+
+pub const J: Matrix3<f64> = Matrix3::<f64>::new(
+    0.0118976, 0.0, 0.0, //
+    0.0, 0.0118976, 0.0, //
+    0.0, 0.0, 0.0218816,
+);
+
+pub const M: f64 = 1.3;
 
 pub fn dq_exp(q: DualQuaternion<f64>) -> UnitDualQuaternion<f64> {
     UnitDualQuaternion::new_unchecked(DualQuaternion::from_real_and_dual(
         q.real.exp(),
         q.real.exp() * q.dual.clone(),
     ))
+}
+
+pub fn dq_ln(q: UnitDualQuaternion<f64>) -> (Vector3<f64>, Vector3<f64>) {
+    if q.real.norm() == 0.0 {
+        (Vector3::<f64>::zeros(), Vector3::<f64>::zeros())
+    } else {
+        (q.real.ln().imag(), (q.dual / q.real.norm()).imag())
+    }
+}
+
+pub fn q_ln(q: UnitQuaternion<f64>) -> Vector3<f64> {
+    let norm = q.norm();
+
+    if norm == 0.0 {
+        Vector3::<f64>::zeros()
+    } else {
+        q.imag() / norm * q.scalar().acos()
+    }
+}
+
+pub fn dq_dot(a: DualQuaternion<f64>, b: DualQuaternion<f64>) -> (f64, f64) {
+    (
+        a.real.dot(&b.real),
+        a.real.dot(&b.dual) + a.dual.dot(&b.real),
+    )
 }
 
 //pub fn cross(self, b: DualQuaternion<T>) -> DualQuaternion<T> {
