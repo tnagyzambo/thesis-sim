@@ -106,7 +106,7 @@ impl State {
         eta.dual.imag() - self.position().cross(&eta.real.imag())
     }
 
-    pub fn log(&self, rec: &rerun::RecordingStream, t: f64) {
+    pub fn log(&self, rec: &rerun::RecordingStream, q_t: &UnitQuaternion<f64>, rate_t: &Vector3<f64>, t: f64) {
         // Set timestep
         rec.set_time_seconds("sim_time", t);
 
@@ -116,10 +116,15 @@ impl State {
 
         // Plot drone
         rec.log(
-            "3d/drone",
+            "3d/world/drone",
             &rerun::InstancePoses3D::new()
                 .with_quaternions([q.into_rerun_quaternion()])
                 .with_translations([r.into_rerun_vec3d()]),
+        )
+        .unwrap();
+        rec.log(
+            "3d/body/drone",
+            &rerun::InstancePoses3D::new().with_quaternions([q.into_rerun_quaternion()]),
         )
         .unwrap();
 
@@ -128,13 +133,28 @@ impl State {
         let y = q * Vector3::<f64>::y_axis().into_inner() * 0.1; // Body frame y-axis expressed in inertial frame
         let z = q * Vector3::<f64>::z_axis().into_inner() * 0.1; // Body frame z-axis expressed in inertial frame
         rec.log(
-            "3d/body_frame",
+            "3d/world/body_frame",
             &rerun::Arrows3D::from_vectors([
                 x.into_rerun_vec3d(),
                 y.into_rerun_vec3d(),
                 z.into_rerun_vec3d(),
             ])
             .with_origins([r.into_rerun_vec3d()])
+            .with_colors([
+                rerun::Color::from_rgb(255, 0, 0),
+                rerun::Color::from_rgb(0, 255, 0),
+                rerun::Color::from_rgb(0, 0, 255),
+            ]),
+        )
+        .unwrap();
+        rec.log(
+            "3d/body/body_frame",
+            &rerun::Arrows3D::from_vectors([
+                x.into_rerun_vec3d(),
+                y.into_rerun_vec3d(),
+                z.into_rerun_vec3d(),
+            ])
+            .with_origins(&[[0.0, 0.0, 0.0]])
             .with_colors([
                 rerun::Color::from_rgb(255, 0, 0),
                 rerun::Color::from_rgb(0, 255, 0),
@@ -168,17 +188,37 @@ impl State {
 
         // Log attitude
         let (roll, pitch, yaw) = q.euler_angles();
+        let (roll_t, pitch_t, yaw_t) = q_t.euler_angles();
         rec.log("attitude/roll", &rerun::Scalar::new(roll)).unwrap();
         rec.log("attitude/pitch", &rerun::Scalar::new(pitch))
             .unwrap();
         rec.log("attitude/yaw", &rerun::Scalar::new(yaw)).unwrap();
-
+        rec.log("attitude/roll_t", &rerun::Scalar::new(roll_t))
+            .unwrap();
+        rec.log("attitude/pitch_t", &rerun::Scalar::new(pitch_t))
+            .unwrap();
+        rec.log("attitude/yaw_t", &rerun::Scalar::new(yaw_t))
+            .unwrap();
+        rec.log("q/q1", &rerun::Scalar::new(q.as_vector()[0])).unwrap();
+        rec.log("q/q2", &rerun::Scalar::new(q.as_vector()[1])).unwrap();
+        rec.log("q/q3", &rerun::Scalar::new(q.as_vector()[2])).unwrap();
+        rec.log("q/q0", &rerun::Scalar::new(q.as_vector()[3])).unwrap();
+        rec.log("q/q1_t", &rerun::Scalar::new(q_t.as_vector()[0])).unwrap();
+        rec.log("q/q2_t", &rerun::Scalar::new(q_t.as_vector()[1])).unwrap();
+        rec.log("q/q3_t", &rerun::Scalar::new(q_t.as_vector()[2])).unwrap();
+        rec.log("q/q0_t", &rerun::Scalar::new(q_t.as_vector()[3])).unwrap();
+       
         // Log angular velocity (body frame)
         let rate = self.angular_velocity_body();
         rec.log("omega/roll", &rerun::Scalar::new(rate[0])).unwrap();
         rec.log("omega/pitch", &rerun::Scalar::new(rate[1]))
             .unwrap();
         rec.log("omega/yaw", &rerun::Scalar::new(rate[2])).unwrap();
+        rec.log("omega/roll_t", &rerun::Scalar::new(rate_t[0])).unwrap();
+        rec.log("omega/pitch_t", &rerun::Scalar::new(rate_t[1]))
+
+            .unwrap();
+        rec.log("omega/yaw_t", &rerun::Scalar::new(rate_t[2])).unwrap();
 
         // Log position (body frame)
         let r_body = self.position_body();
