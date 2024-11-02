@@ -26,11 +26,11 @@ impl App {
             rerun_app,
             duration: 10.0,
             dt: 0.01,
-            roll: 0.0,
+            roll: 0.01,
             pitch: 0.0,
             yaw: 0.0,
             omega: Vector3::<f64>::zeros(),
-            position: Vector3::<f64>::new(1.0, 1.0, 1.0),
+            position: Vector3::<f64>::new(0.0, 0.0, 0.0),
             velocity: Vector3::<f64>::zeros(),
         }
     }
@@ -104,19 +104,24 @@ impl App {
         )
         .unwrap();
 
-        let kp_r = Vector3::new(100.0, 100.0, 3.16);
-        let kp_d = Vector3::new(1.1622, 1.1622, 1.1622);
+        let k_q = 10.0;
+        let k_w = 3.0;
+        let k_p = 0.5;
+        let k_d = 2.0;
+        let k_1 = 0.33;
+        let k_2 = 0.2;
 
-        let kv_r = Vector3::new(50.142, 50.142, 2.51);
-        let kv_d = Vector3::new(2.7063, 2.7063, 2.7063);
-
-        let mut q_t_prev = UnitQuaternion::<f64>::identity();
+        let mut w_t_prev = Vector3::<f64>::zeros();
+        let mut w_body_prev = self.omega;
 
         for i in 0..n {
             let a = -J.try_inverse().unwrap()
                 * (state
                     .angular_velocity_body()
                     .cross(&(J * state.angular_velocity_body())));
+
+            let wdot_body = state.angular_velocity_body() - w_body_prev / dt;
+            w_body_prev = state.angular_velocity_body();
 
             let f = DualQuaternion::from_real_and_dual(
                 Quaternion::from_imag(a),
@@ -142,6 +147,11 @@ impl App {
                 ),
             );
 
+            let f_euler = DualQuaternion::from_real_and_dual(
+                Quaternion::new(0.0, 0.0, 0.0, 0.0),
+                Quaternion::from_imag(-M * wdot_body.cross(&state.position_body())),
+            );
+
             let f_g = DualQuaternion::from_real_and_dual(
                 Quaternion::new(0.0, 0.0, 0.0, 0.0),
                 Quaternion::from_imag(
@@ -149,52 +159,88 @@ impl App {
                 ),
             );
 
-            let p_e = -state.position_body();
-            let v_e = -state.velocity_body();
-            let f_u = M
-                * (Matrix3::<f64>::from_diagonal(&kp_d) * p_e
-                    + Matrix3::<f64>::from_diagonal(&kv_d)
-                        * (state.angular_velocity_body().cross(&p_e) + v_e)
-                    - a.cross(&state.velocity_body())
-                    - state.angular_velocity_body().cross(&state.position_body()))
-                - M * (state.rotation().conjugate() * Vector3::<f64>::new(0.0, 0.0, -9.81));
+            // POS TARGETS
+            let p_t = Vector3::<f64>::zeros();
+            let pdot_t = Vector3::<f64>::zeros();
+            let pddot_t = Vector3::<f64>::zeros();
 
-            let f_ui = state.rotation() * f_u;
+            // GUIDANCE
+            let e_n = p_t - state.position();
 
-            let q_t_scalar = (1.0 / M) * (Vector3::z_axis().dot(&f_ui) + f_ui.norm());
-            let q_t_vec = (1.0 / M) * Vector3::<f64>::z_axis().cross(&f_ui);
-            let q_t = if (q_t_scalar == 0.0) && (q_t_vec.norm() == 0.0) {
-                UnitQuaternion::identity()
+            let e_d = Vector3::<f64>::new(0.0, 0.0, e_n.norm());
+            let q_t = if e_d.cross(&e_n).norm() == 0.0 {
+                UnitQuaternion::<f64>::identity()
             } else {
-                UnitQuaternion::new_normalize(Quaternion::<f64>::from_parts(q_t_scalar, q_t_vec))
+                let theta = k_1 * (k_2 * e_n.norm()).atan();
+                //let theta = (e_d.transpose() * e_n).normalize()[0].acos();
+                let axis = e_d.cross(&e_n).normalize();
+                UnitQuaternion::new_normalize(Quaternion::from_parts(
+                    (theta / 2.0).cos(),
+                    axis * (theta / 2.0).sin(),
+                ))
             };
 
-            let w_t = 2.0 * (q_ln(q_t) - q_ln(q_t_prev)) / dt;
-            q_t_prev = q_t;
+            let skew = if e_n.norm() == 0.0 {
+                Matrix3::<f64>::zeros()
+            } else {
+                Matrix3::<f64>::new(
+                    0.0,
+                    1.0 / e_n.norm(),
+                    0.0, //
+                    -1.0 / e_n.norm(),
+                    0.0,
+                    0.0, //
+                    0.0,
+                    0.0,
+                    0.0, //
+                )
+            };
 
-            let q_e = q_t * state.rotation().conjugate();
-            let w_e = w_t - state.angular_velocity_body();
+            let w_t = skew * (q_t.conjugate() * state.velocity());
 
-            let q_u = 2.0 * q_ln(q_e);
-            let w_u = w_e;
-            let tau_u = J
-                * (Matrix3::<f64>::from_diagonal(&kp_r) * q_u
-                    + Matrix3::<f64>::from_diagonal(&kv_r) * w_u
-                    - (-J.try_inverse().unwrap()
-                        * (state
-                            .angular_velocity_body()
-                            .cross(&(J * state.angular_velocity_body())))));
+            re_log::debug!("{:?}", q_t * state.velocity());
 
+            let wdot_t = (w_t - w_t_prev) / dt;
+            w_t_prev = w_t;
+
+            // ATTITUDE CONTROLLER
+            let q_e = q_t.conjugate() * state.rotation();
+            //let q_e = state.rotation() * q_t.conjugate();
+            let w_e = state.angular_velocity_body() - (q_e.conjugate() * w_t);
+            let wdot_e = wdot_body - (q_e.conjugate() * wdot_t);
+
+            let tau_u = state
+                .angular_velocity_body()
+                .cross(&(J * state.angular_velocity_body()))
+                + J * wdot_e
+                - k_q * q_e.imag()
+                - k_w * w_e;
+
+            // TRANSLATIONAL CONTROLLER
+            let pdot_e = pdot_t - state.velocity();
+
+            let f_thrust =
+                M * pddot_t + Vector3::<f64>::new(0.0, 0.0, M * -9.81) - k_p * e_n - k_d * pdot_e;
+
+            let f_u = if f_thrust[2] > 30.0 {
+                30.0
+            } else if f_thrust[2] < -30.0 {
+                -30.0
+            } else {
+                f_thrust[2]
+            };
+
+            // INPUT
             let u = DualQuaternion::from_real_and_dual(
                 Quaternion::from_imag(Vector3::<f64>::new(tau_u[0], tau_u[1], tau_u[2])),
-                Quaternion::from_imag(Vector3::<f64>::new(0.0, 0.0, f_u.norm())),
+                Quaternion::from_imag(Vector3::<f64>::new(0.0, 0.0, -f_u)),
                 //Quaternion::from_imag(Vector3::<f64>::zeros()),
             );
 
             state.log(&rec, &q_t, &w_t, i as f64 * dt);
 
             // eta is not constrained by the unit norm
-            state.eta = state.eta + dt * (f + f_coriolis + f_centrifugal + f_g + u);
+            state.eta = state.eta + dt * (f + f_coriolis + f_centrifugal + f_euler);
 
             // Exponential intergration to maintain unit norm of q
             state.q = state.q * dq_exp(0.5 * dt * state.eta);

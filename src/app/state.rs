@@ -9,12 +9,12 @@ pub const ROTOR_ARM3: Vector3<f64> = Vector3::<f64>::new(-0.1, 0.1, 0.0);
 pub const ROTOR_ARM4: Vector3<f64> = Vector3::<f64>::new(-0.1, -0.1, 0.0);
 
 pub const J: Matrix3<f64> = Matrix3::<f64>::new(
-    0.0118976, 0.0, 0.0, //
-    0.0, 0.0118976, 0.0, //
-    0.0, 0.0, 0.0218816,
+    0.04338, 0.0, 0.0, //
+    0.0, 0.04338, 0.0, //
+    0.0, 0.0, 0.07050,
 );
 
-pub const M: f64 = 1.3;
+pub const M: f64 = 1.27;
 
 pub fn dq_exp(q: DualQuaternion<f64>) -> UnitDualQuaternion<f64> {
     UnitDualQuaternion::new_unchecked(DualQuaternion::from_real_and_dual(
@@ -106,7 +106,13 @@ impl State {
         eta.dual.imag() - self.position().cross(&eta.real.imag())
     }
 
-    pub fn log(&self, rec: &rerun::RecordingStream, q_t: &UnitQuaternion<f64>, rate_t: &Vector3<f64>, t: f64) {
+    pub fn log(
+        &self,
+        rec: &rerun::RecordingStream,
+        q_t: &UnitQuaternion<f64>,
+        rate_t: &Vector3<f64>,
+        t: f64,
+    ) {
         // Set timestep
         rec.set_time_seconds("sim_time", t);
 
@@ -199,26 +205,35 @@ impl State {
             .unwrap();
         rec.log("attitude/yaw_t", &rerun::Scalar::new(yaw_t))
             .unwrap();
-        rec.log("q/q1", &rerun::Scalar::new(q.as_vector()[0])).unwrap();
-        rec.log("q/q2", &rerun::Scalar::new(q.as_vector()[1])).unwrap();
-        rec.log("q/q3", &rerun::Scalar::new(q.as_vector()[2])).unwrap();
-        rec.log("q/q0", &rerun::Scalar::new(q.as_vector()[3])).unwrap();
-        rec.log("q/q1_t", &rerun::Scalar::new(q_t.as_vector()[0])).unwrap();
-        rec.log("q/q2_t", &rerun::Scalar::new(q_t.as_vector()[1])).unwrap();
-        rec.log("q/q3_t", &rerun::Scalar::new(q_t.as_vector()[2])).unwrap();
-        rec.log("q/q0_t", &rerun::Scalar::new(q_t.as_vector()[3])).unwrap();
-       
+        rec.log("q/q1", &rerun::Scalar::new(q.as_vector()[0]))
+            .unwrap();
+        rec.log("q/q2", &rerun::Scalar::new(q.as_vector()[1]))
+            .unwrap();
+        rec.log("q/q3", &rerun::Scalar::new(q.as_vector()[2]))
+            .unwrap();
+        rec.log("q/q0", &rerun::Scalar::new(q.as_vector()[3]))
+            .unwrap();
+        rec.log("q/q1_t", &rerun::Scalar::new(q_t.as_vector()[0]))
+            .unwrap();
+        rec.log("q/q2_t", &rerun::Scalar::new(q_t.as_vector()[1]))
+            .unwrap();
+        rec.log("q/q3_t", &rerun::Scalar::new(q_t.as_vector()[2]))
+            .unwrap();
+        rec.log("q/q0_t", &rerun::Scalar::new(q_t.as_vector()[3]))
+            .unwrap();
+
         // Log angular velocity (body frame)
         let rate = self.angular_velocity_body();
         rec.log("omega/roll", &rerun::Scalar::new(rate[0])).unwrap();
         rec.log("omega/pitch", &rerun::Scalar::new(rate[1]))
             .unwrap();
         rec.log("omega/yaw", &rerun::Scalar::new(rate[2])).unwrap();
-        rec.log("omega/roll_t", &rerun::Scalar::new(rate_t[0])).unwrap();
-        rec.log("omega/pitch_t", &rerun::Scalar::new(rate_t[1]))
-
+        rec.log("omega/roll_t", &rerun::Scalar::new(rate_t[0]))
             .unwrap();
-        rec.log("omega/yaw_t", &rerun::Scalar::new(rate_t[2])).unwrap();
+        rec.log("omega/pitch_t", &rerun::Scalar::new(rate_t[1]))
+            .unwrap();
+        rec.log("omega/yaw_t", &rerun::Scalar::new(rate_t[2]))
+            .unwrap();
 
         // Log position (body frame)
         let r_body = self.position_body();
