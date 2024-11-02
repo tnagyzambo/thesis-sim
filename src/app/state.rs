@@ -90,7 +90,7 @@ impl State {
     }
 
     pub fn position_body(&self) -> Vector3<f64> {
-        self.q.translation().vector
+        -((self.q.real.conjugate() * self.q.dual) * 2.0).imag()
     }
 
     pub fn velocity_body(&self) -> Vector3<f64> {
@@ -111,6 +111,7 @@ impl State {
         rec: &rerun::RecordingStream,
         q_t: &UnitQuaternion<f64>,
         rate_t: &Vector3<f64>,
+        u: &DualQuaternion<f64>,
         t: f64,
     ) {
         // Set timestep
@@ -269,6 +270,16 @@ impl State {
             .unwrap();
         rec.log("velocity/inertial/z", &rerun::Scalar::new(v[2]))
             .unwrap();
+
+        // Log forces
+        let f = u.dual.imag();
+        let tau = u.real.imag();
+        rec.log("f/x", &rerun::Scalar::new(f[0])).unwrap();
+        rec.log("f/y", &rerun::Scalar::new(f[1])).unwrap();
+        rec.log("f/z", &rerun::Scalar::new(f[2])).unwrap();
+        rec.log("tau/x", &rerun::Scalar::new(tau[0])).unwrap();
+        rec.log("tau/y", &rerun::Scalar::new(tau[1])).unwrap();
+        rec.log("tau/z", &rerun::Scalar::new(tau[2])).unwrap();
     }
 }
 
