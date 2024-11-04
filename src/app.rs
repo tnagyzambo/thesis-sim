@@ -124,7 +124,6 @@ impl App {
 
         let mut w_t_prev = Vector3::<f64>::zeros();
         let mut w_body_prev = self.omega;
-        let mut vel_prev = state.velocity();
 
         for i in 0..n {
             let t = i as f64 * dt;
@@ -135,9 +134,6 @@ impl App {
 
             let wdot_body = (state.angular_velocity_body() - w_body_prev) / dt;
             w_body_prev = state.angular_velocity_body();
-
-            let accel = (state.velocity() - vel_prev) / dt;
-            vel_prev = state.velocity();
 
             let f = DualQuaternion::from_real_and_dual(
                 Quaternion::from_imag(a),
@@ -176,29 +172,29 @@ impl App {
             );
 
             // POS TARGETS
-            //let p_t = Vector3::<f64>::zeros();
-            //let pdot_t = Vector3::<f64>::zeros();
-            //let pddot_t = Vector3::<f64>::zeros();
-            let c1 = 5.0;
-            let c2 = 0.6;
-            let c3 = 10.0;
-            let c4 = 0.5;
-            let c5 = 0.3;
-            let p_t = Vector3::new(
-                c1 * (c2 * t).sin(),
-                c1 * (c2 * t).cos(),
-                c3 - c4 * (c5 * t).sin(),
-            );
-            let pdot_t = Vector3::new(
-                c1 * c2 * (c2 * t).cos(),
-                -c1 * c2 * (c2 * t).sin(),
-                -c4 * c5 * (c5 * t).cos(),
-            );
-            let pddot_t = Vector3::new(
-                -c1 * c2.powi(2) * (c2 * t).sin(),
-                -c1 * c2.powi(2) * (c2 * t).cos(),
-                c4 * c5.powi(2) * (c5 * t).sin(),
-            );
+            let p_t = Vector3::<f64>::new(0.0, 0.0, 1.0);
+            let pdot_t = Vector3::<f64>::zeros();
+            let pddot_t = Vector3::<f64>::zeros();
+            //let c1 = 5.0;
+            //let c2 = 0.6;
+            //let c3 = 10.0;
+            //let c4 = 0.5;
+            //let c5 = 0.3;
+            //let p_t = Vector3::new(
+            //    c1 * (c2 * t).sin(),
+            //    c1 * (c2 * t).cos(),
+            //    c3 - c4 * (c5 * t).sin(),
+            //);
+            //let pdot_t = Vector3::new(
+            //    c1 * c2 * (c2 * t).cos(),
+            //    -c1 * c2 * (c2 * t).sin(),
+            //    -c4 * c5 * (c5 * t).cos(),
+            //);
+            //let pddot_t = Vector3::new(
+            //    -c1 * c2.powi(2) * (c2 * t).sin(),
+            //    -c1 * c2.powi(2) * (c2 * t).cos(),
+            //    c4 * c5.powi(2) * (c5 * t).sin(),
+            //);
 
             // GUIDANCE
             let e_n = p_t - state.position();
@@ -209,7 +205,6 @@ impl App {
                 UnitQuaternion::<f64>::identity()
             } else {
                 let theta = k_1 * (k_2 * e_n.norm()).atan();
-                //let theta = (e_d.transpose() * e_n).normalize()[0].acos();
                 let axis = e_d.cross(&e_n).normalize();
                 UnitQuaternion::new_normalize(Quaternion::from_parts(
                     (theta / 2.0).cos(),
@@ -243,15 +238,10 @@ impl App {
             let w_e = state.angular_velocity_body() - (q_e.conjugate() * w_t);
             let wdot_e = state.rotation() * (q_t.conjugate() * wdot_t);
 
-            //let q_e = UnitQuaternion::identity().conjugate() * state.rotation();
-            //let w_e = state.angular_velocity_body() - (q_e.conjugate() * Vector3::zeros());
-            //let wdot_e = state.rotation() * (q_t.conjugate() * Vector3::zeros());
-
             let tau_u = state
                 .angular_velocity_body()
                 .cross(&(J * state.angular_velocity_body()))
                 + J * wdot_e
-                //- k_q * 2.0 * q_ln(q_e)
                 - k_q * q_e.imag()
                 - k_w * w_e;
 
@@ -274,7 +264,6 @@ impl App {
             let u = DualQuaternion::from_real_and_dual(
                 Quaternion::from_imag(Vector3::<f64>::new(tau_u[0], tau_u[1], tau_u[2])),
                 Quaternion::from_imag(Vector3::<f64>::new(0.0, 0.0, f_u)),
-                //Quaternion::from_imag(Vector3::<f64>::zeros()),
             );
 
             state.log(&rec, &q_t, &w_t, &u, t);
