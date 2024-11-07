@@ -24,7 +24,6 @@ pub fn plot_all_static(rec: &rerun::RecordingStream) -> Result<()> {
     styling_rotational(&rec, "attitude/t", 100, 0.8)?;
     styling_rotational(&rec, "rate/w", 255, 1.0)?;
     styling_rotational(&rec, "rate/t", 100, 0.8)?;
-    styling_rotational(&rec, "torque/world/u", 255, 1.0)?;
     styling_rotational(&rec, "torque/body/u", 100, 0.8)?;
     styling_cartesian(&rec, "position/world/r", 255, 1.0)?;
     styling_cartesian(&rec, "position/world/t", 100, 0.8)?;
@@ -34,7 +33,10 @@ pub fn plot_all_static(rec: &rerun::RecordingStream) -> Result<()> {
     styling_cartesian(&rec, "position/body/t", 100, 0.8)?;
     styling_cartesian(&rec, "velocity/body/v", 255, 1.0)?;
     styling_cartesian(&rec, "velocity/body/t", 100, 0.8)?;
-    styling_cartesian(&rec, "force/world/u", 255, 1.0)?;
+    styling_cartesian(&rec, "force/body/centrifugal", 100, 0.8)?;
+    styling_cartesian(&rec, "force/body/coriolis", 100, 0.8)?;
+    styling_cartesian(&rec, "force/body/euler", 100, 0.8)?;
+    styling_cartesian(&rec, "force/body/g", 100, 0.8)?;
     styling_cartesian(&rec, "force/body/u", 100, 0.8)?;
 
     Ok(())
@@ -46,6 +48,8 @@ pub fn plot_all(
     target_attitude: &UnitQuaternion<f64>,
     target_rate: &Vector3<f64>,
     target_position: &Vector3<f64>,
+    error_position: &Vector3<f64>,
+    error_velocity: &Vector3<f64>,
     wdot_body: &Vector3<f64>,
     tau: &[(Vector3<f64>, &str)],
     f: &[(Vector3<f64>, &str)],
@@ -71,7 +75,7 @@ pub fn plot_all(
 
     // Plot rotational components
     quaternion_parameters(rec, "q/q", &state.attitude())?;
-    quaternion_parameters(rec, "q/t", target_attitude)?;
+    quaternion_parameters(rec, "q/t", &(Q_INVERT.conjugate() * target_attitude))?;
     {
         let (roll, pitch, yaw) = state.attitude().euler_angles();
         let a = Vector3::new(roll, pitch, yaw);
@@ -104,29 +108,16 @@ pub fn plot_all(
         cartesian(rec, format!("force/body/{}", tag).as_str(), force)?;
     }
 
-    // HACK
-    let a = -J_INV * (state.rate().cross(&(J * state.rate())));
-    rotational(rec, "torque/body/big_f", &a)?;
-    cartesian(
-        rec,
-        "force/body/big_f",
-        &(a.cross(&state.position_body()) + state.rate().cross(&state.velocity_body())),
-    )?;
-
     // Plot position in body
     rec.log(
-        "3d/world/r_b",
-        &rerun::Arrows3D::from_vectors(&[
-            (state.rotation() * state.position_body()).into_rerun_vec3d()
-        ])
-        .with_origins(&[state.position().into_rerun_vec3d()]),
+        "3d/world/e",
+        &rerun::Arrows3D::from_vectors(&[(error_position).into_rerun_vec3d()])
+            .with_origins(&[state.position().into_rerun_vec3d()]),
     )?;
     rec.log(
-        "3d/world/v_b",
-        &rerun::Arrows3D::from_vectors(&[
-            (state.rotation() * state.velocity_body()).into_rerun_vec3d()
-        ])
-        .with_origins(&[state.position().into_rerun_vec3d()]),
+        "3d/world/edot",
+        &rerun::Arrows3D::from_vectors(&[(error_velocity).into_rerun_vec3d()])
+            .with_origins(&[state.position().into_rerun_vec3d()]),
     )?;
 
     Ok(())

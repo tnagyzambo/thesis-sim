@@ -9,12 +9,12 @@ pub const ROTOR_ARM4: Vector3<f64> = Vector3::<f64>::new(-0.1, -0.1, 0.0);
 pub const Q_INVERT: UnitQuaternion<f64> =
     UnitQuaternion::new_unchecked(Quaternion::new(0.0, 1.0, 0.0, 0.0));
 
-//const J_11: f64 = 0.04338;
-//const J_22: f64 = 0.04338;
-//const J_33: f64 = 0.07050;
-const J_11: f64 = 1.0;
-const J_22: f64 = 1.0;
-const J_33: f64 = 1.0;
+const J_11: f64 = 0.04338;
+const J_22: f64 = 0.04338;
+const J_33: f64 = 0.07050;
+//const J_11: f64 = 1.0;
+//const J_22: f64 = 1.0;
+//const J_33: f64 = 1.0;
 
 pub const J: Matrix3<f64> = Matrix3::<f64>::new(
     J_11, 0.0, 0.0, //
@@ -139,8 +139,7 @@ impl State {
     }
 
     pub fn velocity(&self) -> Vector3<f64> {
-        let xi = (&self.q * self.xi) * self.q.conjugate();
-        xi.dual.imag() - self.position().cross(&xi.real.imag())
+        self.rotation().conjugate() * self.velocity_body()
     }
 
     pub fn compute_wrench(&self, tau: &[Vector3<f64>], f: &[Vector3<f64>]) -> DualQuaternion<f64> {

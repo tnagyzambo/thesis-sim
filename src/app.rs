@@ -24,13 +24,13 @@ impl App {
     pub fn new(rerun_app: re_viewer::App) -> Self {
         Self {
             rerun_app,
-            duration: 2.5,
+            duration: 5.0,
             dt: 0.01,
             roll: 0.00,
             pitch: 0.0,
             yaw: 0.0,
             omega: Vector3::<f64>::new(0.0, 0.0, 0.0),
-            position: Vector3::<f64>::new(0.0, 1.0, 1.0),
+            position: Vector3::<f64>::new(0.0, 0.0, 0.0),
             velocity: Vector3::<f64>::zeros(),
         }
     }
@@ -54,14 +54,14 @@ impl App {
             &self.omega,
         );
 
-        let k_q = 50.0;
-        let k_w = 6.0;
+        let k_q = 10.0;
+        let k_w = 3.0;
         let k_p = 1.0;
         let k_d = 2.0;
         let k_1 = 0.33;
-        let k_2 = 0.2;
+        let k_2 = 1.0;
 
-        let mut w_t_prev = Vector3::<f64>::zeros();
+        let mut w_d_prev = Vector3::<f64>::zeros();
         let mut w_body_prev = self.omega;
 
         for i in 0..n {
@@ -82,7 +82,7 @@ impl App {
             let f_g = M * (state.attitude().conjugate() * Vector3::<f64>::new(0.0, 0.0, 9.81));
 
             // POS TARGETS
-            let p_t = Vector3::<f64>::new(0.0, 0.0, 0.0);
+            let p_t = Vector3::<f64>::new(1.0, 1.0, 1.0);
             let pdot_t = Vector3::<f64>::zeros();
             let pddot_t = Vector3::<f64>::zeros();
             //let c1 = 5.0;
@@ -107,13 +107,10 @@ impl App {
             //);
 
             // GUIDANCE
-            let e_n = p_t - state.position_body();
-            let edot_n = pdot_t - state.velocity_body();
-
-            plot::plot_vec(&rec, e_n, "3d/world/e_n", t)?;
-            plot::plot_vec(&rec, edot_n, "3d/world/edot_n", t)?;
+            let e_n = Q_INVERT * (p_t - state.position());
+            let edot_n = Q_INVERT * (pdot_t - state.velocity());
             let e_d = Vector3::<f64>::new(0.0, 0.0, -e_n.norm());
-            let q_t = if e_d.cross(&e_n).norm() == 0.0 {
+            let q_d = if e_d.cross(&e_n).norm() == 0.0 {
                 UnitQuaternion::<f64>::identity()
             } else {
                 let theta = k_1 * (k_2 * e_n.norm()).atan();
@@ -123,9 +120,9 @@ impl App {
                     axis * (theta / 2.0).sin(),
                 ))
             };
-            let q_t = Q_INVERT * q_t;
+            let q_d = Q_INVERT * q_d;
 
-            let skew = if e_n.norm() <= 0.01 {
+            let skew = if e_n.norm() <= 0.001 {
                 Matrix3::<f64>::zeros()
             } else {
                 Matrix3::<f64>::new(
@@ -141,15 +138,15 @@ impl App {
                 )
             };
 
-            let w_t = Q_INVERT * (skew * -(q_t.conjugate() * edot_n));
+            let w_d = Q_INVERT * (skew * -(q_d.conjugate() * edot_n));
 
-            let wdot_t = (w_t - w_t_prev) / dt;
-            w_t_prev = w_t;
+            let wdot_d = (w_d - w_d_prev) / dt;
+            w_d_prev = w_d;
 
             // ATTITUDE CONTROLLER
-            let q_e = q_t.conjugate() * state.rotation();
-            let w_e = state.rate() - (q_e.conjugate() * w_t);
-            let wdot_e = state.rotation() * (q_t.conjugate() * wdot_t);
+            let q_e = q_d.conjugate() * state.rotation();
+            let w_e = state.rate() - (q_e.conjugate() * w_d);
+            let wdot_e = state.rotation() * (q_d.conjugate() * wdot_d);
 
             let tau_u = state
                 .rate()
@@ -169,19 +166,21 @@ impl App {
             let f_u = Vector3::new(0.0, 0.0, -f_thrust);
 
             // INPUT
-            let tau: &[(Vector3<f64>, &str)] = &[(tau_u, "u")];
-            let f: &[(Vector3<f64>, &str)] = &[
+            let torques: &[(Vector3<f64>, &str)] = &[(tau_u, "u")];
+            let forces: &[(Vector3<f64>, &str)] = &[
                 (f_centrifugal, "centrifugal"),
-                (f_coriolis, "coriolis"),
-                (f_euler, "euler"),
+                (-f_coriolis, "coriolis"),
+                //(f_euler, "euler"),
                 (f_g, "g"),
                 (f_u, "u"),
             ];
 
-            plot::plot_all(&rec, &state, &q_t, &w_t, &p_t, &wdot_body, tau, f, t)?;
+            plot::plot_all(
+                &rec, &state, &q_d, &w_d, &p_t, &e_n, &edot_n, &wdot_body, torques, forces, t,
+            )?;
 
-            let tau: Vec<Vector3<f64>> = tau.iter().map(|(torque, _)| *torque).collect();
-            let f: Vec<Vector3<f64>> = f.iter().map(|(force, _)| *force).collect();
+            let tau: Vec<Vector3<f64>> = torques.iter().map(|(torque, _)| *torque).collect();
+            let f: Vec<Vector3<f64>> = forces.iter().map(|(force, _)| *force).collect();
 
             // eta is not constrained by the unit norm
             state.xi = state.xi + (dt * state.compute_wrench(tau.as_slice(), f.as_slice()));
