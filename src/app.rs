@@ -1,12 +1,12 @@
-use na::{
-    AbstractRotation, DualQuaternion, Matrix3, Matrix4, Quaternion, UnitDualQuaternion,
-    UnitQuaternion, UnitVector3, Vector3, Vector4,
-};
+use anyhow::Result;
+use na::{DualQuaternion, Matrix3, Quaternion, UnitQuaternion, Vector3};
 use nalgebra as na;
-use re_viewer::external::{eframe, egui, re_log};
+use re_viewer::external::{eframe, egui};
+
+mod plot;
 mod state;
 
-use state::{dq_exp, q_ln, State, J, M};
+use state::{dq_exp, q_ln, State, J, J_INV, M, Q_INVERT};
 
 pub struct App {
     rerun_app: re_viewer::App,
@@ -24,21 +24,23 @@ impl App {
     pub fn new(rerun_app: re_viewer::App) -> Self {
         Self {
             rerun_app,
-            duration: 10.0,
+            duration: 2.5,
             dt: 0.01,
-            roll: 0.01,
+            roll: 0.00,
             pitch: 0.0,
             yaw: 0.0,
-            omega: Vector3::<f64>::zeros(),
-            position: Vector3::<f64>::new(0.0, 0.0, 1.0),
+            omega: Vector3::<f64>::new(0.0, 0.0, 0.0),
+            position: Vector3::<f64>::new(0.0, 1.0, 1.0),
             velocity: Vector3::<f64>::zeros(),
         }
     }
 
-    fn simulate(&self, _ctx: egui::Context) {
+    fn simulate(&self, _ctx: egui::Context) -> Result<()> {
         let rec = re_sdk::RecordingStreamBuilder::new("Simulator")
             .spawn()
             .unwrap();
+
+        plot::plot_all_static(&rec)?;
 
         let dt = self.dt;
         let n = (self.duration / dt).round() as u32;
@@ -52,69 +54,6 @@ impl App {
             &self.omega,
         );
 
-        rec.log_static(
-            "3d/world/drone",
-            &rerun::Asset3D::from_file("assets/drone.stl").unwrap(),
-        )
-        .unwrap();
-        rec.log_static(
-            "3d/body/drone",
-            &rerun::Asset3D::from_file("assets/drone.stl").unwrap(),
-        )
-        .unwrap();
-        rec.log_static(
-            "3d/world/interial_frame",
-            &rerun::Arrows3D::from_vectors(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-                .with_origins(&[[0.0, 0.0, 0.0]])
-                .with_colors([
-                    rerun::Color::from_rgb(255, 0, 0),
-                    rerun::Color::from_rgb(0, 255, 0),
-                    rerun::Color::from_rgb(0, 0, 255),
-                ]),
-        )
-        .unwrap();
-        rec.log_static(
-            "3d/body/interial_frame",
-            &rerun::Arrows3D::from_vectors(&[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-                .with_origins(&[[0.0, 0.0, 0.0]])
-                .with_colors([
-                    rerun::Color::from_rgb(255, 0, 0),
-                    rerun::Color::from_rgb(0, 255, 0),
-                    rerun::Color::from_rgb(0, 0, 255),
-                ]),
-        )
-        .unwrap();
-        rec.log_static(
-            "attitude/roll",
-            &rerun::SeriesLine::new().with_color([255, 0, 0]),
-        )
-        .unwrap();
-        rec.log_static(
-            "attitude/roll_t",
-            &rerun::SeriesLine::new().with_color([200, 0, 0]),
-        )
-        .unwrap();
-        rec.log_static(
-            "attitude/pitch",
-            &rerun::SeriesLine::new().with_color([0, 255, 0]),
-        )
-        .unwrap();
-        rec.log_static(
-            "attitude/pitch_t",
-            &rerun::SeriesLine::new().with_color([0, 200, 0]),
-        )
-        .unwrap();
-        rec.log_static(
-            "attitude/yaw",
-            &rerun::SeriesLine::new().with_color([0, 0, 255]),
-        )
-        .unwrap();
-        rec.log_static(
-            "attitude/yaw_t",
-            &rerun::SeriesLine::new().with_color([0, 0, 200]),
-        )
-        .unwrap();
-
         let k_q = 50.0;
         let k_w = 6.0;
         let k_p = 1.0;
@@ -127,52 +66,23 @@ impl App {
 
         for i in 0..n {
             let t = i as f64 * dt;
-            let a = -J.try_inverse().unwrap()
-                * (state
-                    .angular_velocity_body()
-                    .cross(&(J * state.angular_velocity_body())));
 
-            let wdot_body = (state.angular_velocity_body() - w_body_prev) / dt;
-            w_body_prev = state.angular_velocity_body();
+            let wdot_body = (state.rate() - w_body_prev) / dt;
+            w_body_prev = state.rate();
 
-            let f = DualQuaternion::from_real_and_dual(
-                Quaternion::from_imag(a),
-                Quaternion::from_imag(
-                    a.cross(&state.position_body())
-                        + state.angular_velocity_body().cross(&state.velocity_body()),
-                ),
-            );
+            let f_coriolis = -2.0 * M * state.rate().cross(&state.velocity_body());
 
-            let f_coriolis = DualQuaternion::from_real_and_dual(
-                Quaternion::new(0.0, 0.0, 0.0, 0.0),
-                Quaternion::from_imag(
-                    -2.0 * M * state.angular_velocity_body().cross(&state.velocity_body()),
-                ),
-            );
+            let f_centrifugal = -M
+                * state
+                    .rate()
+                    .cross(&state.rate().cross(&state.position_body()));
 
-            let f_centrifugal = DualQuaternion::from_real_and_dual(
-                Quaternion::new(0.0, 0.0, 0.0, 0.0),
-                Quaternion::from_imag(
-                    -M * state
-                        .angular_velocity_body()
-                        .cross(&state.angular_velocity_body().cross(&state.position_body())),
-                ),
-            );
+            let f_euler = -M * wdot_body.cross(&state.position_body());
 
-            let f_euler = DualQuaternion::from_real_and_dual(
-                Quaternion::new(0.0, 0.0, 0.0, 0.0),
-                Quaternion::from_imag(-M * wdot_body.cross(&state.position_body())),
-            );
-
-            let f_g = DualQuaternion::from_real_and_dual(
-                Quaternion::new(0.0, 0.0, 0.0, 0.0),
-                Quaternion::from_imag(
-                    M * (state.rotation().conjugate() * Vector3::<f64>::new(0.0, 0.0, -9.81)),
-                ),
-            );
+            let f_g = M * (state.attitude().conjugate() * Vector3::<f64>::new(0.0, 0.0, 9.81));
 
             // POS TARGETS
-            let p_t = Vector3::<f64>::new(0.0, 0.0, 1.0);
+            let p_t = Vector3::<f64>::new(0.0, 0.0, 0.0);
             let pdot_t = Vector3::<f64>::zeros();
             let pddot_t = Vector3::<f64>::zeros();
             //let c1 = 5.0;
@@ -197,10 +107,12 @@ impl App {
             //);
 
             // GUIDANCE
-            let e_n = p_t - state.position();
-            let edot_n = pdot_t - state.velocity();
+            let e_n = p_t - state.position_body();
+            let edot_n = pdot_t - state.velocity_body();
 
-            let e_d = Vector3::<f64>::new(0.0, 0.0, e_n.norm());
+            plot::plot_vec(&rec, e_n, "3d/world/e_n", t)?;
+            plot::plot_vec(&rec, edot_n, "3d/world/edot_n", t)?;
+            let e_d = Vector3::<f64>::new(0.0, 0.0, -e_n.norm());
             let q_t = if e_d.cross(&e_n).norm() == 0.0 {
                 UnitQuaternion::<f64>::identity()
             } else {
@@ -211,8 +123,9 @@ impl App {
                     axis * (theta / 2.0).sin(),
                 ))
             };
+            let q_t = Q_INVERT * q_t;
 
-            let skew = if e_n.norm() == 0.0 {
+            let skew = if e_n.norm() <= 0.01 {
                 Matrix3::<f64>::zeros()
             } else {
                 Matrix3::<f64>::new(
@@ -228,21 +141,22 @@ impl App {
                 )
             };
 
-            let w_t = skew * -(q_t.conjugate() * edot_n);
+            let w_t = Q_INVERT * (skew * -(q_t.conjugate() * edot_n));
 
             let wdot_t = (w_t - w_t_prev) / dt;
             w_t_prev = w_t;
 
             // ATTITUDE CONTROLLER
             let q_e = q_t.conjugate() * state.rotation();
-            let w_e = state.angular_velocity_body() - (q_e.conjugate() * w_t);
+            let w_e = state.rate() - (q_e.conjugate() * w_t);
             let wdot_e = state.rotation() * (q_t.conjugate() * wdot_t);
 
             let tau_u = state
-                .angular_velocity_body()
-                .cross(&(J * state.angular_velocity_body()))
+                .rate()
+                .cross(&(J * state.rate()))
                 + J * wdot_e
                 - k_q * q_e.imag()
+                //- k_q * 2.0 * q_ln(q_e)
                 - k_w * w_e;
 
             // TRANSLATIONAL CONTROLLER
@@ -250,30 +164,32 @@ impl App {
             let pdot_e = pdot_t - state.velocity();
 
             let f_thrust =
-                -M * pddot_t - Vector3::new(0.0, 0.0, M * -9.81) + k_p * p_e + k_d * pdot_e;
+                (M * pddot_t + Vector3::new(0.0, 0.0, M * 9.81) + k_p * p_e + k_d * pdot_e)[2];
 
-            let f_u = if f_thrust[2] > 30.0 {
-                30.0
-            } else if f_thrust[2] < -30.0 {
-                -0.0
-            } else {
-                f_thrust[2]
-            };
+            let f_u = Vector3::new(0.0, 0.0, -f_thrust);
 
             // INPUT
-            let u = DualQuaternion::from_real_and_dual(
-                Quaternion::from_imag(Vector3::<f64>::new(tau_u[0], tau_u[1], tau_u[2])),
-                Quaternion::from_imag(Vector3::<f64>::new(0.0, 0.0, f_u)),
-            );
+            let tau: &[(Vector3<f64>, &str)] = &[(tau_u, "u")];
+            let f: &[(Vector3<f64>, &str)] = &[
+                (f_centrifugal, "centrifugal"),
+                (f_coriolis, "coriolis"),
+                (f_euler, "euler"),
+                (f_g, "g"),
+                (f_u, "u"),
+            ];
 
-            state.log(&rec, &q_t, &w_t, &u, t);
+            plot::plot_all(&rec, &state, &q_t, &w_t, &p_t, &wdot_body, tau, f, t)?;
+
+            let tau: Vec<Vector3<f64>> = tau.iter().map(|(torque, _)| *torque).collect();
+            let f: Vec<Vector3<f64>> = f.iter().map(|(force, _)| *force).collect();
 
             // eta is not constrained by the unit norm
-            state.eta = state.eta + (dt * (f + f_coriolis + f_centrifugal + f_euler + f_g + u));
+            state.xi = state.xi + (dt * state.compute_wrench(tau.as_slice(), f.as_slice()));
 
             // Exponential intergration to maintain unit norm of q
-            state.q = state.q * dq_exp(0.5 * dt * state.eta);
+            state.q = state.q * dq_exp(0.5 * dt * state.xi);
         }
+        Ok(())
     }
 }
 
