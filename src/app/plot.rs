@@ -69,20 +69,20 @@ pub fn plot_all(
     update_static_with_pose(
         rec,
         "3d/world/target_frame",
-        &target_attitude,
+        &(Q_INVERT * target_attitude),
         &target_position,
     )?;
 
     // Plot rotational components
     quaternion_parameters(rec, "q/q", &state.attitude())?;
-    quaternion_parameters(rec, "q/t", &(Q_INVERT.conjugate() * target_attitude))?;
+    quaternion_parameters(rec, "q/t", &target_attitude)?;
     {
         let (roll, pitch, yaw) = state.attitude().euler_angles();
         let a = Vector3::new(roll, pitch, yaw);
         rotational(rec, "attitude/q", &a)?;
     }
     {
-        let (roll, pitch, yaw) = (Q_INVERT.conjugate() * target_attitude).euler_angles();
+        let (roll, pitch, yaw) = target_attitude.euler_angles();
         let a_t = Vector3::new(roll, pitch, yaw);
         rotational(rec, "attitude/t", &a_t)?;
     }

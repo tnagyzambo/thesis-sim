@@ -30,7 +30,7 @@ impl App {
             pitch: 0.0,
             yaw: 0.0,
             omega: Vector3::<f64>::new(0.0, 0.0, 0.0),
-            position: Vector3::<f64>::new(0.0, 0.0, 0.0),
+            position: Vector3::<f64>::new(0.0, 0.0, 1.0),
             velocity: Vector3::<f64>::zeros(),
         }
     }
@@ -84,7 +84,7 @@ impl App {
             let f_g = M * (state.attitude().conjugate() * Vector3::<f64>::new(0.0, 0.0, 9.81));
 
             // POS TARGETS
-            let p_t = Vector3::<f64>::new(1.0, 1.0, 1.0);
+            let p_t = Vector3::<f64>::new(1.0, 1.0, 0.0);
             let pdot_t = Vector3::<f64>::zeros();
             let pddot_t = Vector3::<f64>::zeros();
             //let c1 = 5.0;
@@ -110,18 +110,17 @@ impl App {
 
             // GUIDANCE
             let e_n = Q_INVERT * (p_t - state.position());
-            let edot_n = pdot_t - state.velocity();
+            let edot_n = Q_INVERT * (pdot_t - state.velocity());
             let e_d = Vector3::<f64>::new(0.0, 0.0, e_n.norm());
             let q_d = if e_d.cross(&e_n).norm() <= 0.0 {
-                Q_INVERT * UnitQuaternion::<f64>::identity()
+                UnitQuaternion::<f64>::identity()
             } else {
                 let theta = k_1 * (k_2 * e_n.norm()).atan();
                 let axis = e_n.cross(&e_d).normalize();
-                Q_INVERT
-                    * UnitQuaternion::new_normalize(Quaternion::from_parts(
-                        (theta / 2.0).cos(),
-                        axis * (theta / 2.0).sin(),
-                    ))
+                UnitQuaternion::new_normalize(Quaternion::from_parts(
+                    (theta / 2.0).cos(),
+                    axis * (theta / 2.0).sin(),
+                ))
             };
             let skew = if e_n.norm() <= 0.001 {
                 Matrix3::<f64>::zeros()
@@ -144,9 +143,9 @@ impl App {
             w_d_prev = w_d;
 
             // ATTITUDE CONTROLLER
-            let q_e = q_d.conjugate() * state.rotation();
+            let q_e = q_d.conjugate() * state.attitude();
             let w_e = state.rate() - (q_e.conjugate() * w_d);
-            let wdot_e = state.rotation() * (q_d.conjugate() * wdot_d);
+            let wdot_e = state.attitude() * (q_d.conjugate() * wdot_d);
 
             let tau_u = state
                     .rate()
