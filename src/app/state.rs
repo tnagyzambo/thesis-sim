@@ -1,10 +1,12 @@
-use na::{DualQuaternion, Matrix3, Quaternion, UnitDualQuaternion, UnitQuaternion, Vector3};
+use na::{
+    DualQuaternion, Matrix3, Matrix4, Quaternion, UnitDualQuaternion, UnitQuaternion, Vector3,
+};
 use nalgebra as na;
 
-pub const ROTOR_ARM1: Vector3<f64> = Vector3::<f64>::new(0.1, 0.1, 0.0);
-pub const ROTOR_ARM2: Vector3<f64> = Vector3::<f64>::new(0.1, -0.1, 0.0);
-pub const ROTOR_ARM3: Vector3<f64> = Vector3::<f64>::new(-0.1, 0.1, 0.0);
-pub const ROTOR_ARM4: Vector3<f64> = Vector3::<f64>::new(-0.1, -0.1, 0.0);
+pub const R1: f64 = 1.41421356237309504;
+pub const R2: f64 = 1.41421356237309504;
+pub const R3: f64 = 1.41421356237309504;
+pub const R4: f64 = 1.41421356237309504;
 
 pub const Q_INVERT: UnitQuaternion<f64> =
     UnitQuaternion::new_unchecked(Quaternion::new(0.0, 1.0, 0.0, 0.0));
@@ -36,6 +38,42 @@ pub const J_INV: Matrix3<f64> = Matrix3::<f64>::new(
 
 pub const M: f64 = 1.27;
 pub const M_INV: f64 = 1.0 / M;
+
+const C_T: f64 = 1.5E-5;
+const C_M: f64 = 1.9E-7;
+const X: f64 = 0.7071067811865475244008;
+pub const A: Matrix4<f64> = Matrix4::new(
+    C_T,
+    C_T,
+    C_T,
+    C_T, //
+    X * R1 * C_T,
+    -X * R2 * C_T,
+    -X * R3 * C_T,
+    X * R4 * C_T, //
+    X * R1 * C_T,
+    X * R2 * C_T,
+    -X * R3 * C_T,
+    -X * R4 * C_T, //
+    C_M,
+    -C_M,
+    C_M,
+    -C_M,
+);
+
+const TC: f64 = 100.0;
+pub const MOTOR_A: Matrix4<f64> = Matrix4::new(
+    -TC, 0.0, 0.0, 0.0, //
+    0.0, -TC, 0.0, 0.0, //
+    0.0, 0.0, -TC, 0.0, //
+    0.0, 0.0, 0.0, -TC, //
+);
+pub const MOTOR_B: Matrix4<f64> = Matrix4::new(
+    TC, 0.0, 0.0, 0.0, //
+    0.0, TC, 0.0, 0.0, //
+    0.0, 0.0, TC, 0.0, //
+    0.0, 0.0, 0.0, TC, //
+);
 
 pub fn dq_exp(q: DualQuaternion<f64>) -> UnitDualQuaternion<f64> {
     UnitDualQuaternion::new_unchecked(DualQuaternion::from_real_and_dual(

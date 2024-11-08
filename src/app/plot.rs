@@ -1,6 +1,6 @@
-use super::state::{State, J, J_INV, Q_INVERT};
+use super::state::{State, Q_INVERT};
 use anyhow::Result;
-use na::{Quaternion, UnitQuaternion, Vector3};
+use na::{Quaternion, UnitQuaternion, Vector3, Vector4};
 use nalgebra as na;
 
 const COLOR_X: [u8; 3] = [254, 76, 66];
@@ -111,14 +111,40 @@ pub fn plot_all(
     // Plot position in body
     rec.log(
         "3d/world/e",
-        &rerun::Arrows3D::from_vectors(&[(error_position).into_rerun_vec3d()])
-            .with_origins(&[state.position().into_rerun_vec3d()]),
+        &rerun::Arrows3D::from_vectors(&[
+            (Q_INVERT.conjugate() * error_position).into_rerun_vec3d()
+        ])
+        .with_origins(&[state.position().into_rerun_vec3d()]),
     )?;
     rec.log(
         "3d/world/edot",
-        &rerun::Arrows3D::from_vectors(&[(error_velocity).into_rerun_vec3d()])
-            .with_origins(&[state.position().into_rerun_vec3d()]),
+        &rerun::Arrows3D::from_vectors(&[
+            (Q_INVERT.conjugate() * error_velocity).into_rerun_vec3d()
+        ])
+        .with_origins(&[state.position().into_rerun_vec3d()]),
     )?;
+
+    Ok(())
+}
+
+pub fn plot_rotor(
+    rec: &rerun::RecordingStream,
+    rpm_t: &Vector4<f64>,
+    rpm: &Vector4<f64>,
+    t: f64,
+) -> Result<()> {
+    // Set timestep
+    rec.set_time_seconds("sim_time", t);
+
+    // Plot rotor speeds
+    rec.log("rotor/1/t", &rerun::Scalar::new(rpm_t[0]))?;
+    rec.log("rotor/2/t", &rerun::Scalar::new(rpm_t[1]))?;
+    rec.log("rotor/3/t", &rerun::Scalar::new(rpm_t[2]))?;
+    rec.log("rotor/4/t", &rerun::Scalar::new(rpm_t[3]))?;
+    rec.log("rotor/1/w", &rerun::Scalar::new(rpm[0]))?;
+    rec.log("rotor/2/w", &rerun::Scalar::new(rpm[1]))?;
+    rec.log("rotor/3/w", &rerun::Scalar::new(rpm[2]))?;
+    rec.log("rotor/4/w", &rerun::Scalar::new(rpm[3]))?;
 
     Ok(())
 }
@@ -256,6 +282,12 @@ pub fn triade_static(rec: &rerun::RecordingStream, tag: &str, scale: f64, alpha:
         .with_origins(&[[0.0, 0.0, 0.0]])
         .with_colors([[255, 0, 0, alpha], [0, 255, 0, alpha], [0, 0, 255, alpha]]),
     )?;
+    Ok(())
+}
+
+pub fn plot_scalar(rec: &rerun::RecordingStream, scalar: f64, tag: &str, t: f64) -> Result<()> {
+    rec.set_time_seconds("sim_time", t);
+    rec.log(tag, &rerun::Scalar::new(scalar))?;
     Ok(())
 }
 
