@@ -54,7 +54,7 @@ impl App {
             &self.omega,
         );
 
-        let k_q = 10.0;
+        let k_q = 100.0;
         let k_w = 3.0;
         let k_p = 1.0;
         let k_d = 2.0;
@@ -79,34 +79,13 @@ impl App {
                     .rate()
                     .cross(&state.rate().cross(&state.position_body()));
 
-            let f_euler = -M * wdot_body.cross(&state.position_body());
+            // let f_euler = -M * wdot_body.cross(&state.position_body());
 
             let f_g = M * (state.attitude().conjugate() * Vector3::<f64>::new(0.0, 0.0, 9.81));
 
             // POS TARGETS
-            let p_t = Vector3::<f64>::new(1.0, 1.0, 0.0);
+            let p_t = Vector3::<f64>::new(0.0, 0.0, 0.0);
             let pdot_t = Vector3::<f64>::zeros();
-            let pddot_t = Vector3::<f64>::zeros();
-            //let c1 = 5.0;
-            //let c2 = 0.6;
-            //let c3 = 10.0;
-            //let c4 = 0.5;
-            //let c5 = 0.3;
-            //let p_t = Vector3::new(
-            //    c1 * (c2 * t).sin(),
-            //    c1 * (c2 * t).cos(),
-            //    c3 - c4 * (c5 * t).sin(),
-            //);
-            //let pdot_t = Vector3::new(
-            //    c1 * c2 * (c2 * t).cos(),
-            //    -c1 * c2 * (c2 * t).sin(),
-            //    -c4 * c5 * (c5 * t).cos(),
-            //);
-            //let pddot_t = Vector3::new(
-            //    -c1 * c2.powi(2) * (c2 * t).sin(),
-            //    -c1 * c2.powi(2) * (c2 * t).cos(),
-            //    c4 * c5.powi(2) * (c5 * t).sin(),
-            //);
 
             // GUIDANCE
             let e_n = Q_INVERT * (p_t - state.position());
@@ -143,24 +122,23 @@ impl App {
             w_d_prev = w_d;
 
             // ATTITUDE CONTROLLER
-            let q_e = q_d.conjugate() * state.attitude();
-            let w_e = state.rate() - (q_e.conjugate() * w_d);
+            let q_e = q_ln(state.attitude() * q_d.conjugate());
+            let w_e = state.rate() - ((state.attitude() * q_d.conjugate()).conjugate() * w_d);
             let wdot_e = state.attitude() * (q_d.conjugate() * wdot_d);
 
             let tau_u = state
                     .rate()
                     .cross(&(J * state.rate()))
                     + J * wdot_e
-                    - k_q * q_e.imag()
-                    //- k_q * 2.0 * q_ln(q_e)
+                    //- k_q * q_e.imag()
+                    - k_q * q_e
                     - k_w * w_e;
 
             // TRANSLATIONAL CONTROLLER
             let p_e = p_t - state.position();
             let pdot_e = pdot_t - state.velocity();
 
-            let f_thrust =
-                (M * pddot_t + Vector3::new(0.0, 0.0, M * 9.81) + k_p * p_e + k_d * pdot_e)[2];
+            let f_thrust = (Vector3::new(0.0, 0.0, M * 9.81) + k_p * p_e + k_d * pdot_e)[2];
 
             let (f_thrust, tau_u) =
                 motor_tf(f_thrust, tau_u, &mut motor_state, dt, a_inv, &rec, t)?;
@@ -316,7 +294,7 @@ impl eframe::App for App {
                     egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                     |ui| {
                         if ui.button("Simulate").clicked() {
-                            self.simulate(ctx.clone());
+                            self.simulate(ctx.clone()).unwrap();
                         }
                     },
                 )
