@@ -2,6 +2,9 @@ use na::{
     DualQuaternion, Matrix3, Matrix4, Quaternion, UnitDualQuaternion, UnitQuaternion, Vector3,
 };
 use nalgebra as na;
+use re_viewer::external::{eframe, egui, re_log};
+
+const ROOT2: f64 = 1.4142135623730950488016887242096980785696718753769480731766797379;
 
 pub const R1: f64 = 1.41421356237309504;
 pub const R2: f64 = 1.41421356237309504;
@@ -9,7 +12,9 @@ pub const R3: f64 = 1.41421356237309504;
 pub const R4: f64 = 1.41421356237309504;
 
 pub const Q_INVERT: UnitQuaternion<f64> =
-    UnitQuaternion::new_unchecked(Quaternion::new(0.0, 1.0, 0.0, 0.0));
+    UnitQuaternion::new_unchecked(Quaternion::new(0.0, ROOT2 / 2.0, ROOT2 / 2.0, 0.0));
+//pub const Q_INVERT: UnitQuaternion<f64> =
+//    UnitQuaternion::new_unchecked(Quaternion::new(0.0, 1.0, 0.0, 0.0));
 
 const J_11: f64 = 0.04338;
 const J_22: f64 = 0.04338;
@@ -91,12 +96,13 @@ pub fn dq_ln(q: UnitDualQuaternion<f64>) -> (Vector3<f64>, Vector3<f64>) {
 }
 
 pub fn q_ln(q: UnitQuaternion<f64>) -> Vector3<f64> {
+    let q = q.normalize();
     let norm = q.norm();
 
     if norm == 0.0 {
         Vector3::<f64>::zeros()
     } else {
-        q.imag() / norm * q.scalar().acos()
+        (q.imag() / norm) * q.scalar().acos()
     }
 }
 

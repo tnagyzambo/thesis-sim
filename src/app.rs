@@ -24,7 +24,7 @@ impl App {
     pub fn new(rerun_app: re_viewer::App) -> Self {
         Self {
             rerun_app,
-            duration: 5.0,
+            duration: 0.1,
             dt: 0.01,
             roll: 0.0,
             pitch: 0.0,
@@ -140,8 +140,8 @@ impl App {
 
             let f_thrust = (Vector3::new(0.0, 0.0, M * 9.81) + k_p * p_e + k_d * pdot_e)[2];
 
-            let (f_thrust, tau_u) =
-                motor_tf(f_thrust, tau_u, &mut motor_state, dt, a_inv, &rec, t)?;
+            //let (f_thrust, tau_u) =
+            //    motor_tf(f_thrust, tau_u, &mut motor_state, dt, a_inv, &rec, t)?;
 
             let f_u = Vector3::new(0.0, 0.0, -f_thrust);
 
