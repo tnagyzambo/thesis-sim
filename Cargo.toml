@@ -5,12 +5,14 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.83"
-mimalloc = "0.1.43"
+rand = "0.8.5"
+rand_distr = "0.4.3"
 rerun = "0.18.2"
 re_crash_handler = "0.18.2"
 re_memory = "0.18.2"
 re_sdk = "0.18.2"
 re_sdk_comms = { version = "0.18.2", features = ["server"] }
 re_viewer = "=0.18.2"
-tracing = "0.1.37"
+mimalloc = "0.1.43"
 nalgebra = "0.32.5"
+tracing = "0.1.37"

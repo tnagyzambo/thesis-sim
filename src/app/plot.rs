@@ -1,4 +1,5 @@
 use super::state::{State, Q_INVERT};
+use super::{Force, Torque};
 use anyhow::Result;
 use na::{Quaternion, UnitQuaternion, Vector3, Vector4};
 use nalgebra as na;
@@ -123,6 +124,83 @@ pub fn plot_all(
         ])
         .with_origins(&[state.position().into_rerun_vec3d()]),
     )?;
+
+    Ok(())
+}
+
+pub fn plot_state(rec: &rerun::RecordingStream, state: &State, t: f64) -> Result<()> {
+    // Set timestep
+    rec.set_time_seconds("sim_time", t);
+
+    // Plot drone
+    update_static_with_pose(rec, "3d/world/drone", &state.rotation(), &state.position())?;
+    update_static_with_pose(
+        rec,
+        "3d/world/body_frame",
+        &state.rotation(),
+        &state.position(),
+    )?;
+
+    // Plot rotational components
+    quaternion_parameters(rec, "q/q", &state.attitude())?;
+    {
+        let (roll, pitch, yaw) = state.attitude().euler_angles();
+        let a = Vector3::new(roll, pitch, yaw);
+        rotational(rec, "attitude/q", &a)?;
+    }
+    rotational(rec, "rate/w", &state.rate())?;
+
+    // Plot translational components
+    cartesian(rec, "position/world/r", &state.position())?;
+    cartesian(rec, "velocity/world/v", &state.velocity())?;
+    cartesian(rec, "position/body/r", &state.position_body())?;
+    cartesian(rec, "velocity/body/v", &state.velocity_body())?;
+
+    Ok(())
+}
+
+pub fn plot_noisy_state(rec: &rerun::RecordingStream, state: &State, t: f64) -> Result<()> {
+    // Set timestep
+    rec.set_time_seconds("sim_time", t);
+
+    // Plot rotational components
+    quaternion_parameters(rec, "q/q_n", &state.attitude())?;
+    {
+        let (roll, pitch, yaw) = state.attitude().euler_angles();
+        let a = Vector3::new(roll, pitch, yaw);
+        rotational(rec, "attitude/q_n", &a)?;
+    }
+    rotational(rec, "rate/w_n", &state.rate())?;
+
+    // Plot translational components
+    cartesian(rec, "position/world/r_n", &state.position())?;
+    cartesian(rec, "velocity/world/v_n", &state.velocity())?;
+    cartesian(rec, "position/body/r_n", &state.position_body())?;
+    cartesian(rec, "velocity/body/v_n", &state.velocity_body())?;
+
+    Ok(())
+}
+
+pub fn plot_forces(
+    rec: &rerun::RecordingStream,
+    forces: &Vec<Force>,
+    torques: &Vec<Torque>,
+    t: f64,
+) -> Result<()> {
+    // Set timestep
+    rec.set_time_seconds("sim_time", t);
+
+    // Plot forces
+    for torque in torques.iter() {
+        rotational(
+            rec,
+            format!("torque/body/{}", torque.name).as_str(),
+            &torque.tau,
+        )?;
+    }
+    for force in forces.iter() {
+        cartesian(rec, format!("force/body/{}", force.name).as_str(), &force.f)?;
+    }
 
     Ok(())
 }

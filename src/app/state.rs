@@ -13,8 +13,6 @@ pub const R4: f64 = 1.41421356237309504;
 
 pub const Q_INVERT: UnitQuaternion<f64> =
     UnitQuaternion::new_unchecked(Quaternion::new(0.0, ROOT2 / 2.0, ROOT2 / 2.0, 0.0));
-//pub const Q_INVERT: UnitQuaternion<f64> =
-//    UnitQuaternion::new_unchecked(Quaternion::new(0.0, 1.0, 0.0, 0.0));
 
 const J_11: f64 = 0.04338;
 const J_22: f64 = 0.04338;
@@ -118,6 +116,28 @@ pub fn dq_dot(a: DualQuaternion<f64>, b: DualQuaternion<f64>) -> (f64, f64) {
         a.real.dot(&b.real),
         a.real.dot(&b.dual) + a.dual.dot(&b.real),
     )
+}
+
+pub struct Force {
+    pub f: Vector3<f64>,
+    pub name: String,
+}
+
+impl Force {
+    pub fn new(f: Vector3<f64>, name: String) -> Self {
+        Self { f, name }
+    }
+}
+
+pub struct Torque {
+    pub tau: Vector3<f64>,
+    pub name: String,
+}
+
+impl Torque {
+    pub fn new(tau: Vector3<f64>, name: String) -> Self {
+        Self { tau, name }
+    }
 }
 
 //pub fn cross(self, b: DualQuaternion<T>) -> DualQuaternion<T> {
