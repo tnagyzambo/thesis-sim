@@ -8,8 +8,9 @@ mod dynamics;
 mod measurement;
 mod plot;
 mod state;
+mod ukf;
 
-use state::{dq_exp, q_ln, Force, State, Torque, A, J, M, MOTOR_A, MOTOR_B, Q_INVERT};
+use state::{dq_exp, q_ln, Force, State, Torque, A, J, M, MOTOR_A, MOTOR_B, M_INV, Q_INVERT};
 
 pub struct App {
     rerun_app: re_viewer::App,
@@ -59,23 +60,38 @@ impl App {
 
         let mut controller_state = control::ControllerState::default();
         let mut motor_state = Vector4::<f64>::zeros();
+        let mut accl = Vector3::zeros();
 
         for i in 0..n {
             let t = i as f64 * dt;
-            plot::plot_state(&rec, &state, t)?;
+            plot::plot_state(&rec, &state, &accl, t)?;
 
-            let noisy_state = measurement::measurment(&state);
-            plot::plot_noisy_state(&rec, &noisy_state, t)?;
+            // MEASURE
+            let (noisy_pos, noisy_vel, noisy_accl, noisy_rate) =
+                measurement::measurment(&state, accl);
+            plot::plot_measurments(&rec, &noisy_pos, &noisy_vel, &noisy_accl, &noisy_rate, t)?;
+
+            // FILTER
+            let filtered_state = ukf::ukf(
+                &rec,
+                &noisy_pos,
+                &noisy_vel,
+                &noisy_accl,
+                &noisy_rate,
+                &state,
+            );
 
             // CONTROL
             let (f_u, tau_u) = control::control(
                 &rec,
-                &noisy_state,
+                &filtered_state,
                 &mut controller_state,
                 &mut motor_state,
                 dt,
                 t,
             )?;
+
+            accl = M_INV * f_u.f;
 
             // INPUT
             let torques = vec![tau_u];

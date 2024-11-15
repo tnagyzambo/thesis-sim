@@ -128,7 +128,12 @@ pub fn plot_all(
     Ok(())
 }
 
-pub fn plot_state(rec: &rerun::RecordingStream, state: &State, t: f64) -> Result<()> {
+pub fn plot_state(
+    rec: &rerun::RecordingStream,
+    state: &State,
+    accl: &Vector3<f64>,
+    t: f64,
+) -> Result<()> {
     // Set timestep
     rec.set_time_seconds("sim_time", t);
 
@@ -155,28 +160,29 @@ pub fn plot_state(rec: &rerun::RecordingStream, state: &State, t: f64) -> Result
     cartesian(rec, "velocity/world/v", &state.velocity())?;
     cartesian(rec, "position/body/r", &state.position_body())?;
     cartesian(rec, "velocity/body/v", &state.velocity_body())?;
+    cartesian(rec, "acceleration/body/a", accl)?;
 
     Ok(())
 }
 
-pub fn plot_noisy_state(rec: &rerun::RecordingStream, state: &State, t: f64) -> Result<()> {
+pub fn plot_measurments(
+    rec: &rerun::RecordingStream,
+    pos: &Vector3<f64>,
+    vel: &Vector3<f64>,
+    accl: &Vector3<f64>,
+    rate: &Vector3<f64>,
+    t: f64,
+) -> Result<()> {
     // Set timestep
     rec.set_time_seconds("sim_time", t);
 
     // Plot rotational components
-    quaternion_parameters(rec, "q/q_n", &state.attitude())?;
-    {
-        let (roll, pitch, yaw) = state.attitude().euler_angles();
-        let a = Vector3::new(roll, pitch, yaw);
-        rotational(rec, "attitude/q_n", &a)?;
-    }
-    rotational(rec, "rate/w_n", &state.rate())?;
+    rotational(rec, "rate/w_n", rate)?;
 
     // Plot translational components
-    cartesian(rec, "position/world/r_n", &state.position())?;
-    cartesian(rec, "velocity/world/v_n", &state.velocity())?;
-    cartesian(rec, "position/body/r_n", &state.position_body())?;
-    cartesian(rec, "velocity/body/v_n", &state.velocity_body())?;
+    cartesian(rec, "position/world/r_n", pos)?;
+    cartesian(rec, "velocity/world/v_n", vel)?;
+    cartesian(rec, "acceleration/body/a_n", accl)?;
 
     Ok(())
 }
