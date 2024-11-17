@@ -1,3 +1,5 @@
+#![feature(generic_const_exprs)]
+#![feature(maybe_uninit_array_assume_init)]
 use re_viewer::external::{eframe, egui, re_log, re_memory};
 
 mod app;

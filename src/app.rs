@@ -1,7 +1,7 @@
 use anyhow::Result;
 use na::{Vector3, Vector4};
 use nalgebra as na;
-use re_viewer::external::{eframe, egui};
+use re_viewer::external::{eframe, egui, re_log};
 
 mod control;
 mod dynamics;
@@ -34,7 +34,7 @@ impl App {
             pitch: 0.0,
             yaw: 0.0,
             omega: Vector3::<f64>::new(0.0, 0.0, 0.0),
-            position: Vector3::<f64>::new(0.0, 0.0, 1.0),
+            position: Vector3::<f64>::new(1.0, 1.0, 1.0),
             velocity: Vector3::<f64>::zeros(),
         }
     }
@@ -58,6 +58,8 @@ impl App {
             &self.omega,
         );
 
+        let mut ukf_state = ukf::UkfState::new();
+
         let mut controller_state = control::ControllerState::default();
         let mut motor_state = Vector4::<f64>::zeros();
         let mut accl = Vector3::zeros();
@@ -79,7 +81,10 @@ impl App {
                 &noisy_accl,
                 &noisy_rate,
                 &state,
-            );
+                &mut ukf_state,
+                dt,
+                t,
+            )?;
 
             // CONTROL
             let (f_u, tau_u) = control::control(
@@ -91,12 +96,18 @@ impl App {
                 t,
             )?;
 
-            accl = M_INV * f_u.f;
-
             // INPUT
             let torques = vec![tau_u];
             let mut forces = dynamics::ficticous_forces(&state);
             forces.push(dynamics::gravity(&state));
+            accl = M_INV
+                * forces
+                    .iter()
+                    .map(|force| force.f)
+                    .collect::<Vec<Vector3<f64>>>()
+                    .as_slice()
+                    .iter()
+                    .sum::<Vector3<f64>>();
             forces.push(f_u);
             plot::plot_forces(&rec, &forces, &torques, t)?;
 
@@ -188,7 +199,10 @@ impl eframe::App for App {
                     egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                     |ui| {
                         if ui.button("Simulate").clicked() {
-                            self.simulate(ctx.clone()).unwrap();
+                            match self.simulate(ctx.clone()) {
+                                Ok(()) => (),
+                                Err(e) => re_log::error!("{}", e),
+                            };
                         }
                     },
                 )
