@@ -1,8 +1,8 @@
 use super::plot;
 use super::State;
-use anyhow::{Error, Result};
+use anyhow::{anyhow, Error, Result};
 use core::mem::MaybeUninit;
-use na::{Quaternion, SMatrix, SVector, Vector3};
+use na::{DualQuaternion, Quaternion, SMatrix, SVector, Vector3};
 use nalgebra as na;
 use rerun::external::re_log;
 
@@ -16,7 +16,11 @@ trait ConstrainedAlgebra<T, const N: usize> {
 #[derive(Debug, Clone)]
 struct Vector<const N: usize>(SVector<f64, N>);
 
-impl<const N: usize> Vector<N> {}
+impl<const N: usize> Vector<N> {
+    fn new() -> Self {
+        Self(SVector::<f64, N>::zeros())
+    }
+}
 
 impl<const N: usize> From<SVector<f64, N>> for Vector<N> {
     fn from(v: SVector<f64, N>) -> Self {
@@ -53,12 +57,6 @@ impl<const N: usize> ConstrainedAlgebra<Self, N> for Vector<N> {
 struct UnitQuaternion(na::UnitQuaternion<f64>);
 
 impl UnitQuaternion {
-    fn new() -> Self {
-        Self(na::UnitQuaternion::from_quaternion(Quaternion::new(
-            1.0, 0.0, 0.0, 0.0,
-        )))
-    }
-
     fn as_vector(&self) -> &SVector<f64, 4> {
         self.0.as_vector()
     }
@@ -115,82 +113,158 @@ impl ConstrainedAlgebra<Self, 3> for UnitQuaternion {
 }
 
 #[derive(Debug, Clone)]
+pub struct UnitDualQuaternion(na::UnitDualQuaternion<f64>);
+
+impl UnitDualQuaternion {
+    fn new() -> Self {
+        Self(na::UnitDualQuaternion::new_normalize(
+            DualQuaternion::from_real_and_dual(Quaternion::identity(), Quaternion::identity()),
+        ))
+    }
+}
+
+impl From<na::UnitDualQuaternion<f64>> for UnitDualQuaternion {
+    fn from(q: na::UnitDualQuaternion<f64>) -> Self {
+        Self(q)
+    }
+}
+
+impl From<SVector<f64, 8>> for UnitDualQuaternion {
+    fn from(v: SVector<f64, 8>) -> Self {
+        Self(na::UnitDualQuaternion::new_normalize(
+            DualQuaternion::from_real_and_dual(
+                Quaternion::from_vector(v.fixed_rows::<4>(0).clone_owned()),
+                Quaternion::from_vector(v.fixed_rows::<4>(4).clone_owned()),
+            ),
+        ))
+    }
+}
+
+impl From<DualQuaternion<f64>> for UnitDualQuaternion {
+    fn from(q: DualQuaternion<f64>) -> Self {
+        Self(na::UnitDualQuaternion::new_normalize(q))
+    }
+}
+
+impl ConstrainedAlgebra<Self, 6> for UnitDualQuaternion {
+    //  super::state::dq_ln(self.0 * rhs.0.conjugate())
+    fn inner_difference(&self, rhs: &Self) -> SVector<f64, 6> {
+        let trans_lhs = (self.0.real.conjugate() * self.0.dual * 2.0).imag();
+        let trans_rhs = (rhs.0.real.conjugate() * rhs.0.dual * 2.0).imag();
+
+        na::stack![UnitQuaternion::from(self.0.real).inner_difference(&UnitQuaternion::from(rhs.0.real));
+             na::UnitQuaternion::from_quaternion(rhs.0.real).conjugate() * (trans_lhs - trans_rhs)]
+    }
+
+    //         (super::dq_exp(na::DualQuaternion::from_real_and_dual(
+    //         na::Quaternion::from_imag(rhs.fixed_rows::<3>(0).into()),
+    //         na::Quaternion::from_imag(rhs.fixed_rows::<3>(3).into()),
+    //     )) * self.0).into()
+
+    fn inner_displacement<'a>(&self, rhs: SVector<f64, 6>) -> Self {
+        let rotation = na::UnitQuaternion::new(rhs.fixed_rows::<3>(0)).exp() * self.0.real;
+        let trans_lhs = (self.0.real.conjugate() * self.0.dual * 2.0).imag();
+
+        na::DualQuaternion::from_real_and_dual(
+            rotation,
+            super::state::q_product(
+                rotation,
+                na::Quaternion::from_imag(
+                    trans_lhs
+                        + na::UnitQuaternion::from_quaternion(self.0.real) * rhs.fixed_rows::<3>(3),
+                ) * 0.5,
+            ),
+        )
+        .into()
+    }
+
+    fn weighted_mean<const M: usize>(x: &[Self; M], w: &[f64; M]) -> Result<Self> {
+        let rotations: [UnitQuaternion; M] =
+            core::array::from_fn(|i| UnitQuaternion::from(x[i].0.real));
+        let translations: [Vector<3>; M] =
+            core::array::from_fn(|i| (x[i].0.real.conjugate() * x[i].0.dual * 2.0).imag().into());
+
+        let rotation_mean = UnitQuaternion::weighted_mean(&rotations, w)?;
+        let translation_mean = Vector::<3>::weighted_mean(&translations, w)?;
+
+        let q_mean = UnitDualQuaternion::from(na::DualQuaternion::from_real_and_dual(
+            *rotation_mean.0.quaternion(),
+            super::state::q_product(
+                *rotation_mean.0.quaternion(),
+                na::Quaternion::from_imag(translation_mean.0),
+            ) * 0.5,
+        ));
+
+        Ok(q_mean)
+    }
+}
+
+#[derive(Debug, Clone)]
 struct MixedVector<const N: usize> {
-    q: UnitQuaternion,
-    e: SVector<f64, N>,
+    q: UnitDualQuaternion,
+    e: Vector<N>,
 }
 
 impl<const N: usize> MixedVector<N> {
     fn default() -> Self {
         Self {
-            q: UnitQuaternion::new(),
-            e: SVector::<f64, N>::zeros(),
+            q: UnitDualQuaternion::new(),
+            e: Vector::<N>::new(),
         }
     }
-    fn quaternion(&self) -> &UnitQuaternion {
+    fn dual_quaternion(&self) -> &UnitDualQuaternion {
         &self.q
     }
 
-    fn euclidean(&self) -> &SVector<f64, N> {
+    fn euclidean(&self) -> &Vector<N> {
         &self.e
     }
 
-    fn from_components(q: UnitQuaternion, e: SVector<f64, N>) -> Self {
+    fn from_components(q: UnitDualQuaternion, e: Vector<N>) -> Self {
         Self { q, e }
     }
 }
 
-impl<const N: usize> ConstrainedAlgebra<Self, { N + 3 }> for MixedVector<N> {
-    fn inner_difference(&self, rhs: &Self) -> SVector<f64, { N + 3 }> {
-        let mut d = SVector::<f64, { N + 3 }>::zeros();
-        let dq = self.quaternion().inner_difference(rhs.quaternion());
-        let de = self.euclidean() - rhs.euclidean();
-        d.fixed_rows_mut::<3>(0).copy_from(&dq);
-        d.fixed_rows_mut::<N>(3).copy_from(&de);
+impl<const N: usize> ConstrainedAlgebra<Self, { N + 6 }> for MixedVector<N> {
+    fn inner_difference(&self, rhs: &Self) -> SVector<f64, { N + 6 }> {
+        let mut d = SVector::<f64, { N + 6 }>::zeros();
+        let dq = self
+            .dual_quaternion()
+            .inner_difference(rhs.dual_quaternion());
+        let de = self.euclidean().0 - rhs.euclidean().0;
+        d.fixed_rows_mut::<6>(0).copy_from(&dq);
+        d.fixed_rows_mut::<N>(6).copy_from(&de);
 
         d
     }
 
-    fn inner_displacement(&self, rhs: SVector<f64, { N + 3 }>) -> Self {
+    fn inner_displacement(&self, rhs: SVector<f64, { N + 6 }>) -> Self {
         Self {
             q: self
-                .quaternion()
-                .inner_displacement(rhs.fixed_rows::<3>(0).clone_owned()),
-            e: self.euclidean() - rhs.fixed_rows::<N>(3),
+                .dual_quaternion()
+                .inner_displacement(rhs.fixed_rows::<6>(0).clone_owned()),
+            e: Vector::from(self.euclidean().0 - rhs.fixed_rows::<N>(6)),
         }
     }
 
     fn weighted_mean<const M: usize>(x: &[Self; M], w: &[f64; M]) -> Result<Self> {
-        // Quaternion weighted mean based on the method presented by Markley et al.
-        // REFERENCE: https://doi.org/10.2514/1.28949
-        let mut q_accu = SMatrix::<f64, 4, 4>::zeros();
-        let mut e_mean = SVector::<f64, N>::zeros();
-        for (x, w) in x.iter().zip(w) {
-            q_accu += *w * (x.quaternion().as_vector() * x.quaternion().as_vector().transpose());
-            e_mean += *w * x.euclidean();
-        }
+        let q: [UnitDualQuaternion; M] = core::array::from_fn(|i| x[i].dual_quaternion().clone());
+        let e: [Vector<N>; M] = core::array::from_fn(|i| x[i].euclidean().clone());
 
-        // Find the eigenvector associated with the largest eigenvalue of the accumulator matrix
-        // SVD decomp is guaranteed to generate eigenvalues in descending magnitude
-        let q_mean = UnitQuaternion::from(
-            q_accu
-                .svd(true, false)
-                .u
-                .ok_or(Error::msg("Failed to compute SVD"))?
-                .fixed_columns::<1>(0)
-                .clone_owned(),
-        );
+        let q_mean = UnitDualQuaternion::weighted_mean(&q, w)?;
+        let e_mean = Vector::<N>::weighted_mean(&e, w)?;
 
         Ok(Self::from_components(q_mean, e_mean))
     }
 }
 
 type StateVector = MixedVector<3>;
-type StateVectorAugmented = MixedVector<6>;
+type StateVectorAugmented = MixedVector<9>;
 
-fn measurement_model(m: &Vector<6>, _u: &(), _dt: &()) -> UnitQuaternion {
+fn measurement_model(m: &Vector<9>, _u1: &(), _u2: &(), _dt: &()) -> UnitDualQuaternion {
     let a = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(0)).normalize();
     let b = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(3)).normalize();
+    let r = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(6));
 
     let a_x = -a[0];
     let a_y = -a[1];
@@ -206,11 +280,11 @@ fn measurement_model(m: &Vector<6>, _u: &(), _dt: &()) -> UnitQuaternion {
         ]);
         Quaternion::from_parts(w, ijk)
     } else {
-        let w = -a_y / (2.0 * (1.0 - a_x)).sqrt();
+        let w = -a_y / (2.0 * (1.0 - a_z)).sqrt();
         let ijk = SVector::<f64, 3>::from([
-            ((1.0 - a_x) / 2.0).sqrt(),
+            ((1.0 - a_z) / 2.0).sqrt(),
             0.0,
-            a_x / (2.0 * (1.0 - a_x)).sqrt(),
+            a_x / (2.0 * (1.0 - a_z)).sqrt(),
         ]);
         Quaternion::from_parts(w, ijk)
     };
@@ -240,7 +314,15 @@ fn measurement_model(m: &Vector<6>, _u: &(), _dt: &()) -> UnitQuaternion {
 
     let e_m = UnitQuaternion::from(q_m);
 
-    UnitQuaternion::from(e_a.0 * e_m.0)
+    //let rotation = na::UnitQuaternion::from(e_a.0 * e_m.0);
+    let rotation = super::Q_INVERT * na::UnitQuaternion::from(e_a.0);
+
+    let r_body = rotation * r;
+
+    UnitDualQuaternion::from(na::DualQuaternion::from_real_and_dual(
+        *rotation,
+        super::state::q_product(*rotation, Quaternion::from_imag(r_body)) * 0.5,
+    ))
 }
 
 /// Observation model.
@@ -249,8 +331,8 @@ fn measurement_model(m: &Vector<6>, _u: &(), _dt: &()) -> UnitQuaternion {
 ///
 /// * `x` - Quaternion state vector
 ///
-fn observation_model(x: &StateVector, _u: &(), _dt: &()) -> UnitQuaternion {
-    x.quaternion().to_owned()
+fn observation_model(x: &StateVector, _u1: &(), _u2: &(), _dt: &()) -> UnitDualQuaternion {
+    x.dual_quaternion().to_owned()
 }
 
 /// Compute the expected out of the process given a set of inputs.
@@ -261,24 +343,32 @@ fn observation_model(x: &StateVector, _u: &(), _dt: &()) -> UnitQuaternion {
 /// * `w` - Measured gyroscopic rates [w_x; w_y; w_z] (rad/s)
 /// * `dt` - Timestep (s)
 ///
-fn process_model(x: &StateVectorAugmented, w: &SVector<f64, 3>, dt: &f64) -> StateVector {
+fn process_model(
+    x: &StateVectorAugmented,
+    w: &SVector<f64, 3>,
+    v: &SVector<f64, 3>,
+    dt: &f64,
+) -> StateVector {
     // Remove estimated bias and noise with gyroscope measurment model
-    let b = x.euclidean().fixed_rows::<3>(0);
-    let q = x.euclidean().fixed_rows::<3>(3);
+    let b = x.euclidean().0.fixed_rows::<3>(0);
+    let q = x.euclidean().0.fixed_rows::<3>(3);
     let w = w - b - q;
 
-    // Quaternion rotation kinematic equation
-    let phi = (0.5 * w.norm() * dt).sin() * w / w.norm();
-    let a = (0.5 * w.norm() * dt).cos();
-    let omega = SMatrix::<f64, 4, 4>::new(
-        a, phi[2], -phi[1], phi[0], //
-        -phi[2], a, phi[0], phi[1], //
-        phi[1], -phi[0], a, phi[2], //
-        -phi[0], -phi[1], -phi[2], a,
-    );
-    let e_k = UnitQuaternion::from(omega * x.quaternion().as_vector());
+    let rotation = na::UnitQuaternion::from_quaternion(x.dual_quaternion().0.real);
+    let v = v - x.euclidean().0.fixed_rows::<3>(6);
+    let v_body = rotation.conjugate() * v;
 
-    StateVector::from_components(e_k, b.clone_owned())
+    let position =
+        (x.dual_quaternion().0.real.conjugate() * x.dual_quaternion().0.dual * 2.0).imag();
+
+    let xi = na::DualQuaternion::from_real_and_dual(
+        na::Quaternion::from_imag(w),
+        na::Quaternion::from_imag(v_body + w.cross(&position)),
+    );
+
+    let e_k = x.dual_quaternion().0 * super::state::dq_exp(0.5 * dt * xi);
+
+    StateVector::from_components(e_k.into(), Vector::from(b.clone_owned()))
 }
 
 /// Compute the unscented transformation of the measurment vector through the observation
@@ -294,10 +384,11 @@ fn ut<X, Y, U, T, const N: usize, const M: usize>(
     alpha: f64,
     kappa: f64,
     beta: f64,
-    f: fn(&X, &U, &T) -> Y,
+    f: fn(&X, &U, &U, &T) -> Y,
     x: &X,
     p_xx: &SMatrix<f64, N, N>,
-    u: &U,
+    u1: &U,
+    u2: &U,
     dt: &T,
 ) -> Result<(Y, SMatrix<f64, M, M>, SMatrix<f64, N, M>)>
 where
@@ -308,12 +399,10 @@ where
     let lambda = alpha.powi(2) * (N as f64 + kappa) - N as f64;
 
     // p_xx_root is used to generate a distribution of sigma points
-    let mut p = p_xx.clone();
-    let l = loop {
-        match p.cholesky() {
-            Some(c) => break c.l(),
-            None => p += SMatrix::<f64, N, N>::from_diagonal_element(1.0),
-        }
+    let p = p_xx.clone();
+    let l = match p.cholesky() {
+        Some(c) => c.l(),
+        None => (p + SMatrix::<f64, N, N>::identity()) / 2.0,
     };
 
     // Create and propagate sigma points and weights
@@ -331,14 +420,14 @@ where
             let c = 0.5 / (N as f64 + lambda);
 
             x_cal[i + i_offset].write(sigma_point.clone());
-            y_cal[i + i_offset].write(f(&sigma_point, u, dt));
+            y_cal[i + i_offset].write(f(&sigma_point, u1, u2, dt));
             w_m[i + i_offset].write(m);
             w_c[i + i_offset].write(c);
         }
     }
 
     x_cal[0].write(x.clone());
-    y_cal[0].write(f(&x, u, dt));
+    y_cal[0].write(f(&x, u1, u2, dt));
     w_m[0].write(lambda / (N as f64 + lambda));
     w_c[0].write(lambda / (N as f64 + lambda) + (1.0 - alpha.powi(2) + beta));
 
@@ -376,20 +465,25 @@ where
 }
 
 pub struct UkfState {
-    q1: SMatrix<f64, 3, 3>,
-    q2: SMatrix<f64, 6, 6>,
-    r: SMatrix<f64, 6, 6>,
+    q1: SMatrix<f64, 6, 6>,
+    q2: SMatrix<f64, 9, 9>,
+    r: SMatrix<f64, 9, 9>,
     x_kk1: StateVector,
-    p_xx_kk1: SMatrix<f64, 6, 6>,
+    p_xx_kk1: SMatrix<f64, 9, 9>,
 }
 
 impl UkfState {
     pub fn new() -> Self {
-        // Covariance matrix of multiplicative process noise = diag([gyroscope_noise_3x1])
-        let q1 = SMatrix::<f64, 3, 3>::from_diagonal(&SVector::<f64, 3>::from([10.0, 10.0, 10.0]));
+        // Covariance matrix of multiplicative process noise = diag([gyroscope_noise_3x1, velocity_noise_3x1])
+        let q1 = SMatrix::<f64, 6, 6>::from_diagonal(&SVector::<f64, 6>::from([
+            10.0, 10.0, 10.0, 1.0, 1.0, 1.0,
+        ]));
 
-        // Covariance matrix of additive process noise = diag([quaternion_process_noise_3x1, gyroscope_bias_3x1])
-        let q2 = SMatrix::<f64, 6, 6>::from_diagonal(&SVector::<f64, 6>::from([
+        // Covariance matrix of additive process noise = diag([quaternion_process_noise_3x1, pos_process_noise_3x1, gyroscope_bias_3x1])
+        let q2 = SMatrix::<f64, 9, 9>::from_diagonal(&SVector::<f64, 9>::from([
+            0.00000000001,
+            0.00000000001,
+            0.00000000001,
             0.00000000001,
             0.00000000001,
             0.00000000001,
@@ -398,17 +492,17 @@ impl UkfState {
             0.001,
         ]));
 
-        // Covariance matrix of measurment noise = diag([accelerometer_noise_3x1, magnetometer_noise_3x1])
-        let r = SMatrix::<f64, 6, 6>::from_diagonal(&SVector::<f64, 6>::from([
-            1.0, 1.0, 1.0, 100.0, 100.0, 100.0,
+        // Covariance matrix of measurment noise = diag([accelerometer_noise_3x1, magnetometer_noise_3x1, pos_noise_3x1])
+        let r = SMatrix::<f64, 9, 9>::from_diagonal(&SVector::<f64, 9>::from([
+            1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
         ]));
 
-        // State vector = [attitude_quaternion_vec_4x1; gyroscope_rate_bias_3x1]
+        // State vector = [attitude_quaternion_vec_4x1; pos_quaternion_vec_4x1, gyroscope_rate_bias_3x1]
         let x_kk1 = StateVector::default();
 
-        // State covariance matrix = diag([rotation_vector_3x1, gyroscope_bias_3x1])
-        let p_xx_kk1 = SMatrix::<f64, 6, 6>::from_diagonal(&SVector::<f64, 6>::from([
-            0.1, 0.1, 0.1, 0.001, 0.001, 0.001,
+        // State covariance matrix = diag([rotation_vector_3x1, pos_vector_3x1, gyroscope_bias_3x1])
+        let p_xx_kk1 = SMatrix::<f64, 9, 9>::from_diagonal(&SVector::<f64, 9>::from([
+            0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.001, 0.001, 0.001,
         ]));
 
         Self {
@@ -438,13 +532,16 @@ pub fn ukf(
 
     // Measurment vector (m/s^2, guass)
     let mag = state.attitude() * Vector3::<f64>::new(1.0, 0.0, 0.0); // TEMPORARY
-    let m = Vector::<6>::from([accl[0], accl[1], accl[2], mag[0], mag[1], mag[2]]);
+    let m = Vector::<9>::from([
+        accl[0], accl[1], accl[2], mag[0], mag[1], mag[2], pos[0], pos[1], pos[2],
+    ]);
 
     // Gryoscopic rate vector (rad/s)
     let w = SVector::<f64, 3>::from([rate[0], rate[1], rate[2]]);
 
     // Compute the attitude and covariance from the accelerometer measurement
     // TODO: Fix the .unwrap()
+    re_log::info!("meas");
     let (y_k, r_k, _) = ut(
         1.0,
         0.01,
@@ -454,28 +551,30 @@ pub fn ukf(
         &ukf_state.r,
         &(),
         &(),
+        &(),
     )?;
 
     //
     // Forecast
     //
 
-    // Augmented state vector = [state_vector_7x1; q1_vector_3x1]
-    let mut e = SVector::<f64, 6>::zeros();
-    e.fixed_rows_mut::<3>(0)
-        .copy_from(ukf_state.x_kk1.euclidean());
-    let x_aug = StateVectorAugmented::from_components(ukf_state.x_kk1.quaternion().clone(), e);
+    // Augmented state vector = [state_vector_7x1; q1_vector_6x1]
+    let mut e = Vector::<9>::new();
+    e.0.fixed_rows_mut::<3>(0)
+        .copy_from(&ukf_state.x_kk1.euclidean().0);
+    let x_aug = StateVectorAugmented::from_components(ukf_state.x_kk1.dual_quaternion().clone(), e);
 
     // Augmented state covariance matrix = diag([state_covariance_6x6, multiplacative_process_noise_covariance_3x3])
-    let mut p_xx_aug = SMatrix::<f64, 9, 9>::zeros();
+    let mut p_xx_aug = SMatrix::<f64, 15, 15>::zeros();
     p_xx_aug
-        .fixed_view_mut::<6, 6>(0, 0)
+        .fixed_view_mut::<9, 9>(0, 0)
         .copy_from(&ukf_state.p_xx_kk1);
     p_xx_aug
-        .fixed_view_mut::<3, 3>(6, 6)
+        .fixed_view_mut::<6, 6>(9, 9)
         .copy_from(&ukf_state.q1);
 
     // Predict the state and covariance via an unscented transformation of the augmented state + covariance
+    re_log::info!("proc");
     (ukf_state.x_kk1, ukf_state.p_xx_kk1, _) = ut(
         1.0,
         0.01,
@@ -484,6 +583,7 @@ pub fn ukf(
         &x_aug,
         &p_xx_aug,
         &w,
+        &vel,
         &(dt as f64),
     )?;
 
@@ -491,6 +591,7 @@ pub fn ukf(
     ukf_state.p_xx_kk1 += ukf_state.q2;
 
     // Predict measurement
+    re_log::info!("obv");
     let (y_kk1, mut p_yy_kk1, p_xy_kk1) = ut(
         1.0,
         0.01,
@@ -500,13 +601,11 @@ pub fn ukf(
         &ukf_state.p_xx_kk1,
         &(),
         &(),
+        &(),
     )?;
 
     // Measurment covariance update
     p_yy_kk1 += r_k;
-
-    // Innovation
-    let v_k = y_k.inner_difference(&y_kk1);
 
     //
     // Data assimilation
@@ -527,9 +626,51 @@ pub fn ukf(
     ukf_state.x_kk1 = x_k;
     ukf_state.p_xx_kk1 = p_xx_k;
 
-    let q = ukf_state.x_kk1.quaternion().0;
+    let q = na::UnitQuaternion::from_quaternion(ukf_state.x_kk1.dual_quaternion().0.real);
+    let r = (ukf_state.x_kk1.dual_quaternion().0.real.conjugate()
+        * ukf_state.x_kk1.dual_quaternion().0.dual
+        * 2.0)
+        .imag();
 
-    plot::plot_ukf(rec, &q, t)?;
+    plot::plot_ukf(rec, &q, &r, t)?;
 
     Ok(state.clone())
+}
+
+fn denman_beavers_sqrt<const N: usize>(
+    a: SMatrix<f64, N, N>,
+    tol: f64,
+    max_iter: usize,
+) -> Result<SMatrix<f64, N, N>> {
+    if a.nrows() != a.ncols() {
+        return Err(anyhow!("Matrix must be square"));
+    }
+
+    let mut y = a.clone();
+    let mut z = SMatrix::<f64, N, N>::identity();
+
+    for _ in 0..max_iter {
+        let y_inv = match y.clone().try_inverse() {
+            Some(inv) => inv,
+            None => return Err(anyhow!("Matrix inversion failed during iteration")),
+        };
+
+        let z_inv = match z.clone().try_inverse() {
+            Some(inv) => inv,
+            None => return Err(anyhow!("Matrix inversion failed during iteration")),
+        };
+
+        let y_next = 0.5 * (&y + &z_inv);
+        let z_next = 0.5 * (&z + &y_inv);
+
+        // Check for convergence
+        if (&y_next - &y).norm() < tol {
+            return Ok(y_next);
+        }
+
+        y = y_next;
+        z = z_next;
+    }
+
+    Err(anyhow!("Denman-Beavers iteration did not converge"))
 }

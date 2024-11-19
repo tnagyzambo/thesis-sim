@@ -1,8 +1,9 @@
 use na::{
-    DualQuaternion, Matrix3, Matrix4, Quaternion, UnitDualQuaternion, UnitQuaternion, Vector3,
+    stack, DualQuaternion, Matrix3, Matrix4, Quaternion, SVector, UnitDualQuaternion,
+    UnitQuaternion, Vector3,
 };
 use nalgebra as na;
-use re_viewer::external::{eframe, egui, re_log};
+use re_viewer::external::re_log;
 
 const ROOT2: f64 = 1.4142135623730950488016887242096980785696718753769480731766797379;
 
@@ -85,11 +86,11 @@ pub fn dq_exp(q: DualQuaternion<f64>) -> UnitDualQuaternion<f64> {
     ))
 }
 
-pub fn dq_ln(q: UnitDualQuaternion<f64>) -> (Vector3<f64>, Vector3<f64>) {
+pub fn dq_ln(q: UnitDualQuaternion<f64>) -> SVector<f64, 6> {
     if q.real.norm() == 0.0 {
-        (Vector3::<f64>::zeros(), Vector3::<f64>::zeros())
+        SVector::<f64, 6>::zeros()
     } else {
-        (q.real.ln().imag(), (q.dual / q.real.norm()).imag())
+        stack![q_ln(UnitQuaternion::from_quaternion(q.real)); (q.dual / q.real.norm()).imag()]
     }
 }
 

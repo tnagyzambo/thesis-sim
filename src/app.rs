@@ -28,13 +28,13 @@ impl App {
     pub fn new(rerun_app: re_viewer::App) -> Self {
         Self {
             rerun_app,
-            duration: 5.0,
+            duration: 0.2,
             dt: 0.01,
             roll: 0.0,
             pitch: 0.0,
             yaw: 0.0,
             omega: Vector3::<f64>::new(0.0, 0.0, 0.0),
-            position: Vector3::<f64>::new(1.0, 1.0, 1.0),
+            position: Vector3::<f64>::new(1.2, 1.4, 2.0),
             velocity: Vector3::<f64>::zeros(),
         }
     }

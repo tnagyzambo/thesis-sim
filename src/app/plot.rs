@@ -187,17 +187,24 @@ pub fn plot_measurments(
     Ok(())
 }
 
-pub fn plot_ukf(rec: &rerun::RecordingStream, q: &UnitQuaternion<f64>, t: f64) -> Result<()> {
+pub fn plot_ukf(
+    rec: &rerun::RecordingStream,
+    q: &UnitQuaternion<f64>,
+    r: &Vector3<f64>,
+    t: f64,
+) -> Result<()> {
     // Set timestep
     rec.set_time_seconds("sim_time", t);
 
     // Plot rotational components
     quaternion_parameters(rec, "q/ukf", q)?;
     {
-        let (roll, pitch, yaw) = q.euler_angles();
+        let (roll, pitch, yaw) = (Q_INVERT.conjugate() * q).euler_angles();
         let a = Vector3::new(roll, pitch, yaw);
         rotational(rec, "attitude/ukf", &a)?;
     }
+
+    cartesian(rec, "position/body/ukf", r)?;
 
     Ok(())
 }
