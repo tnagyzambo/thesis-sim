@@ -74,7 +74,7 @@ pub fn control(
                     - K_W * w_e;
 
     // TRANSLATIONAL CONTROLLER
-    let p_e = p_t - state.position();
+    let p_e = p_t + Vector3::new(0.0, 0.0, 1.0) - state.position();
     let pdot_e = pdot_t - state.velocity();
 
     let f_thrust = (Vector3::new(0.0, 0.0, M * 9.81) + K_P * p_e + K_D * pdot_e)[2];

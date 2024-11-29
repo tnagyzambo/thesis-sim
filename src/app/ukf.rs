@@ -1,4 +1,5 @@
 use super::plot;
+use super::state::Q_INVERT;
 use super::State;
 use anyhow::{anyhow, Error, Result};
 use core::mem::MaybeUninit;
@@ -258,16 +259,16 @@ impl<const N: usize> ConstrainedAlgebra<Self, { N + 6 }> for MixedVector<N> {
     }
 }
 
-type StateVector = MixedVector<3>;
-type StateVectorAugmented = MixedVector<9>;
+type StateVector = MixedVector<6>;
+type StateVectorAugmented = MixedVector<12>;
 
-fn measurement_model(m: &Vector<9>, _u1: &(), _u2: &(), _dt: &()) -> UnitDualQuaternion {
+fn measurement_model(m: &Vector<9>, _u: &(), _dt: &()) -> UnitDualQuaternion {
     let a = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(0)).normalize();
     let b = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(3)).normalize();
     let r = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(6));
 
-    let a_x = -a[0];
-    let a_y = -a[1];
+    let a_x = a[0];
+    let a_y = a[1];
     let a_z = a[2];
 
     // Switch case based on sign of a_z
@@ -315,7 +316,7 @@ fn measurement_model(m: &Vector<9>, _u1: &(), _u2: &(), _dt: &()) -> UnitDualQua
     let e_m = UnitQuaternion::from(q_m);
 
     //let rotation = na::UnitQuaternion::from(e_a.0 * e_m.0);
-    let rotation = super::Q_INVERT * na::UnitQuaternion::from(e_a.0);
+    let rotation = na::UnitQuaternion::from(e_a.0) * Q_INVERT;
 
     let r_body = rotation * r;
 
@@ -331,7 +332,7 @@ fn measurement_model(m: &Vector<9>, _u1: &(), _u2: &(), _dt: &()) -> UnitDualQua
 ///
 /// * `x` - Quaternion state vector
 ///
-fn observation_model(x: &StateVector, _u1: &(), _u2: &(), _dt: &()) -> UnitDualQuaternion {
+fn observation_model(x: &StateVector, _u: &(), _dt: &()) -> UnitDualQuaternion {
     x.dual_quaternion().to_owned()
 }
 
@@ -339,36 +340,37 @@ fn observation_model(x: &StateVector, _u1: &(), _u2: &(), _dt: &()) -> UnitDualQ
 ///
 /// Arguments:
 ///
-/// * `x` - Augmented state vector [attitude_quaternion_vec_4x1; gyroscope_rate_bias_3x1, gyroscope_measurment_noise_3x1]
+/// * `x` - Augmented state vector [attitude_quaternion_vec_4x1; vel_3x1, gyroscope_rate_bias_3x1, gyroscope_measurment_noise_3x1]
 /// * `w` - Measured gyroscopic rates [w_x; w_y; w_z] (rad/s)
 /// * `dt` - Timestep (s)
 ///
-fn process_model(
-    x: &StateVectorAugmented,
-    w: &SVector<f64, 3>,
-    v: &SVector<f64, 3>,
-    dt: &f64,
-) -> StateVector {
+fn process_model(x: &StateVectorAugmented, d: &SVector<f64, 6>, dt: &f64) -> StateVector {
+    let w = d.fixed_rows::<3>(0);
+    let a = d.fixed_rows::<3>(3);
+
     // Remove estimated bias and noise with gyroscope measurment model
-    let b = x.euclidean().0.fixed_rows::<3>(0);
-    let q = x.euclidean().0.fixed_rows::<3>(3);
+    let b = x.euclidean().0.fixed_rows::<3>(3);
+    let q = x.euclidean().0.fixed_rows::<3>(6);
     let w = w - b - q;
 
-    let rotation = na::UnitQuaternion::from_quaternion(x.dual_quaternion().0.real);
-    let v = v - x.euclidean().0.fixed_rows::<3>(6);
-    let v_body = rotation.conjugate() * v;
+    let v = x.euclidean().0.fixed_rows::<3>(0);
+    let g = SVector::<f64, 3>::new(0.0, 0.0, -9.81);
+    let v = v + (a + g) * *dt;
 
     let position =
         (x.dual_quaternion().0.real.conjugate() * x.dual_quaternion().0.dual * 2.0).imag();
 
     let xi = na::DualQuaternion::from_real_and_dual(
         na::Quaternion::from_imag(w),
-        na::Quaternion::from_imag(v_body + w.cross(&position)),
+        na::Quaternion::from_imag(v + w.cross(&position)),
     );
 
     let e_k = x.dual_quaternion().0 * super::state::dq_exp(0.5 * dt * xi);
 
-    StateVector::from_components(e_k.into(), Vector::from(b.clone_owned()))
+    StateVector::from_components(
+        e_k.into(),
+        Vector::from(SVector::<f64, 6>::new(v[0], v[1], v[2], b[0], b[1], b[2])),
+    )
 }
 
 /// Compute the unscented transformation of the measurment vector through the observation
@@ -384,11 +386,10 @@ fn ut<X, Y, U, T, const N: usize, const M: usize>(
     alpha: f64,
     kappa: f64,
     beta: f64,
-    f: fn(&X, &U, &U, &T) -> Y,
+    f: fn(&X, &U, &T) -> Y,
     x: &X,
     p_xx: &SMatrix<f64, N, N>,
-    u1: &U,
-    u2: &U,
+    u: &U,
     dt: &T,
 ) -> Result<(Y, SMatrix<f64, M, M>, SMatrix<f64, N, M>)>
 where
@@ -420,14 +421,14 @@ where
             let c = 0.5 / (N as f64 + lambda);
 
             x_cal[i + i_offset].write(sigma_point.clone());
-            y_cal[i + i_offset].write(f(&sigma_point, u1, u2, dt));
+            y_cal[i + i_offset].write(f(&sigma_point, u, dt));
             w_m[i + i_offset].write(m);
             w_c[i + i_offset].write(c);
         }
     }
 
     x_cal[0].write(x.clone());
-    y_cal[0].write(f(&x, u1, u2, dt));
+    y_cal[0].write(f(&x, u, dt));
     w_m[0].write(lambda / (N as f64 + lambda));
     w_c[0].write(lambda / (N as f64 + lambda) + (1.0 - alpha.powi(2) + beta));
 
@@ -466,10 +467,10 @@ where
 
 pub struct UkfState {
     q1: SMatrix<f64, 6, 6>,
-    q2: SMatrix<f64, 9, 9>,
+    q2: SMatrix<f64, 12, 12>,
     r: SMatrix<f64, 9, 9>,
     x_kk1: StateVector,
-    p_xx_kk1: SMatrix<f64, 9, 9>,
+    p_xx_kk1: SMatrix<f64, 12, 12>,
 }
 
 impl UkfState {
@@ -479,14 +480,17 @@ impl UkfState {
             10.0, 10.0, 10.0, 1.0, 1.0, 1.0,
         ]));
 
-        // Covariance matrix of additive process noise = diag([quaternion_process_noise_3x1, pos_process_noise_3x1, gyroscope_bias_3x1])
-        let q2 = SMatrix::<f64, 9, 9>::from_diagonal(&SVector::<f64, 9>::from([
+        // Covariance matrix of additive process noise = diag([quaternion_process_noise_3x1, pos_process_noise_3x1, vel_bias_3x1, gyroscope_bias_3x1])
+        let q2 = SMatrix::<f64, 12, 12>::from_diagonal(&SVector::<f64, 12>::from([
             0.00000000001,
             0.00000000001,
             0.00000000001,
             0.00000000001,
             0.00000000001,
             0.00000000001,
+            0.0,
+            0.0,
+            0.0,
             0.001,
             0.001,
             0.001,
@@ -500,9 +504,9 @@ impl UkfState {
         // State vector = [attitude_quaternion_vec_4x1; pos_quaternion_vec_4x1, gyroscope_rate_bias_3x1]
         let x_kk1 = StateVector::default();
 
-        // State covariance matrix = diag([rotation_vector_3x1, pos_vector_3x1, gyroscope_bias_3x1])
-        let p_xx_kk1 = SMatrix::<f64, 9, 9>::from_diagonal(&SVector::<f64, 9>::from([
-            0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.001, 0.001, 0.001,
+        // State covariance matrix = diag([rotation_vector_3x1, pos_vector_3x1, vel_bias_3x1, gyroscope_bias_3x1])
+        let p_xx_kk1 = SMatrix::<f64, 12, 12>::from_diagonal(&SVector::<f64, 12>::from([
+            0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.001, 0.001, 0.001,
         ]));
 
         Self {
@@ -537,7 +541,7 @@ pub fn ukf(
     ]);
 
     // Gryoscopic rate vector (rad/s)
-    let w = SVector::<f64, 3>::from([rate[0], rate[1], rate[2]]);
+    let d = SVector::<f64, 6>::from([rate[0], rate[1], rate[2], accl[0], accl[1], accl[2]]);
 
     // Compute the attitude and covariance from the accelerometer measurement
     // TODO: Fix the .unwrap()
@@ -551,7 +555,6 @@ pub fn ukf(
         &ukf_state.r,
         &(),
         &(),
-        &(),
     )?;
 
     //
@@ -559,18 +562,18 @@ pub fn ukf(
     //
 
     // Augmented state vector = [state_vector_7x1; q1_vector_6x1]
-    let mut e = Vector::<9>::new();
-    e.0.fixed_rows_mut::<3>(0)
+    let mut e = Vector::<12>::new();
+    e.0.fixed_rows_mut::<6>(0)
         .copy_from(&ukf_state.x_kk1.euclidean().0);
     let x_aug = StateVectorAugmented::from_components(ukf_state.x_kk1.dual_quaternion().clone(), e);
 
     // Augmented state covariance matrix = diag([state_covariance_6x6, multiplacative_process_noise_covariance_3x3])
-    let mut p_xx_aug = SMatrix::<f64, 15, 15>::zeros();
+    let mut p_xx_aug = SMatrix::<f64, 18, 18>::zeros();
     p_xx_aug
-        .fixed_view_mut::<9, 9>(0, 0)
+        .fixed_view_mut::<12, 12>(0, 0)
         .copy_from(&ukf_state.p_xx_kk1);
     p_xx_aug
-        .fixed_view_mut::<6, 6>(9, 9)
+        .fixed_view_mut::<6, 6>(12, 12)
         .copy_from(&ukf_state.q1);
 
     // Predict the state and covariance via an unscented transformation of the augmented state + covariance
@@ -582,8 +585,7 @@ pub fn ukf(
         process_model,
         &x_aug,
         &p_xx_aug,
-        &w,
-        &vel,
+        &d,
         &(dt as f64),
     )?;
 
@@ -601,7 +603,6 @@ pub fn ukf(
         &ukf_state.p_xx_kk1,
         &(),
         &(),
-        &(),
     )?;
 
     // Measurment covariance update
@@ -612,8 +613,10 @@ pub fn ukf(
     //
 
     // Kalman gain
-    // TODO: Fix the .unwrap()
-    let k_k = p_xy_kk1 * p_yy_kk1.try_inverse().unwrap();
+    let p_yy_kk1_inv = p_yy_kk1
+        .try_inverse()
+        .ok_or_else(|| anyhow!("Inverse Failed"));
+    let k_k = p_xy_kk1 * p_yy_kk1_inv?;
 
     // State estimate
     let v_k = y_k.inner_difference(&y_kk1);
@@ -635,42 +638,4 @@ pub fn ukf(
     plot::plot_ukf(rec, &q, &r, t)?;
 
     Ok(state.clone())
-}
-
-fn denman_beavers_sqrt<const N: usize>(
-    a: SMatrix<f64, N, N>,
-    tol: f64,
-    max_iter: usize,
-) -> Result<SMatrix<f64, N, N>> {
-    if a.nrows() != a.ncols() {
-        return Err(anyhow!("Matrix must be square"));
-    }
-
-    let mut y = a.clone();
-    let mut z = SMatrix::<f64, N, N>::identity();
-
-    for _ in 0..max_iter {
-        let y_inv = match y.clone().try_inverse() {
-            Some(inv) => inv,
-            None => return Err(anyhow!("Matrix inversion failed during iteration")),
-        };
-
-        let z_inv = match z.clone().try_inverse() {
-            Some(inv) => inv,
-            None => return Err(anyhow!("Matrix inversion failed during iteration")),
-        };
-
-        let y_next = 0.5 * (&y + &z_inv);
-        let z_next = 0.5 * (&z + &y_inv);
-
-        // Check for convergence
-        if (&y_next - &y).norm() < tol {
-            return Ok(y_next);
-        }
-
-        y = y_next;
-        z = z_next;
-    }
-
-    Err(anyhow!("Denman-Beavers iteration did not converge"))
 }

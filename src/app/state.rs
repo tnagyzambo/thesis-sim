@@ -3,24 +3,20 @@ use na::{
     UnitQuaternion, Vector3,
 };
 use nalgebra as na;
-use re_viewer::external::re_log;
 
 const ROOT2: f64 = 1.4142135623730950488016887242096980785696718753769480731766797379;
 
-pub const R1: f64 = 1.41421356237309504;
-pub const R2: f64 = 1.41421356237309504;
-pub const R3: f64 = 1.41421356237309504;
-pub const R4: f64 = 1.41421356237309504;
+pub const R1: f64 = 0.113;
+pub const R2: f64 = 0.113;
+pub const R3: f64 = 0.113;
+pub const R4: f64 = 0.113;
 
 pub const Q_INVERT: UnitQuaternion<f64> =
     UnitQuaternion::new_unchecked(Quaternion::new(0.0, ROOT2 / 2.0, ROOT2 / 2.0, 0.0));
 
-const J_11: f64 = 0.04338;
-const J_22: f64 = 0.04338;
-const J_33: f64 = 0.07050;
-//const J_11: f64 = 1.0;
-//const J_22: f64 = 1.0;
-//const J_33: f64 = 1.0;
+const J_11: f64 = 0.002473;
+const J_22: f64 = 0.002685;
+const J_33: f64 = 0.004403;
 
 pub const J: Matrix3<f64> = Matrix3::<f64>::new(
     J_11, 0.0, 0.0, //
@@ -40,11 +36,11 @@ pub const J_INV: Matrix3<f64> = Matrix3::<f64>::new(
     1.0 / J_33,
 );
 
-pub const M: f64 = 1.27;
+pub const M: f64 = 1.5259;
 pub const M_INV: f64 = 1.0 / M;
 
-const C_T: f64 = 1.5E-5;
-const C_M: f64 = 1.9E-7;
+const C_T: f64 = 1.5E-6;
+const C_M: f64 = 1.9E-8;
 const X: f64 = 0.7071067811865475244008;
 pub const A: Matrix4<f64> = Matrix4::new(
     C_T,
@@ -65,7 +61,7 @@ pub const A: Matrix4<f64> = Matrix4::new(
     -C_M,
 );
 
-const TC: f64 = 100.0;
+const TC: f64 = 10.0;
 pub const MOTOR_A: Matrix4<f64> = Matrix4::new(
     -TC, 0.0, 0.0, 0.0, //
     0.0, -TC, 0.0, 0.0, //

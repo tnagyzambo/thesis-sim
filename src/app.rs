@@ -61,8 +61,9 @@ impl App {
         let mut ukf_state = ukf::UkfState::new();
 
         let mut controller_state = control::ControllerState::default();
-        let mut motor_state = Vector4::<f64>::zeros();
+        let mut motor_state = Vector4::<f64>::new(1500.0, 1500.0, 1500.0, 1500.0);
         let mut accl = Vector3::zeros();
+        let mut bias = Vector3::zeros();
 
         for i in 0..n {
             let t = i as f64 * dt;
@@ -70,7 +71,7 @@ impl App {
 
             // MEASURE
             let (noisy_pos, noisy_vel, noisy_accl, noisy_rate) =
-                measurement::measurment(&state, accl);
+                measurement::measurment(&state, accl, &mut bias);
             plot::plot_measurments(&rec, &noisy_pos, &noisy_vel, &noisy_accl, &noisy_rate, t)?;
 
             // FILTER
@@ -100,6 +101,12 @@ impl App {
             let torques = vec![tau_u];
             let mut forces = dynamics::ficticous_forces(&state);
             forces.push(dynamics::gravity(&state));
+
+            //if (1.2 >= t) && (t > 1.0) {
+            //    let disturbance = Force::new(Vector3::new(10.0, 10.0, 10.0), "dist".to_string());
+            //    forces.push(disturbance);
+            //}
+
             accl = M_INV
                 * forces
                     .iter()
