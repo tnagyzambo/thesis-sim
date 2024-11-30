@@ -23,10 +23,14 @@ pub fn plot_all_static(rec: &rerun::RecordingStream) -> Result<()> {
     styling_quaternion_parameters(&rec, "q/t", 100, 0.8)?;
     styling_rotational(&rec, "attitude/q", 255, 1.0)?;
     styling_rotational(&rec, "attitude/t", 100, 0.8)?;
+    styling_rotational(&rec, "attitude/ukf", 100, 0.8)?;
     styling_rotational(&rec, "rate/w", 255, 1.0)?;
+    styling_rotational(&rec, "rate/w_n", 255, 1.0)?;
     styling_rotational(&rec, "rate/t", 100, 0.8)?;
+    styling_rotational(&rec, "rate/bias", 100, 0.8)?;
     styling_rotational(&rec, "torque/body/u", 100, 0.8)?;
     styling_cartesian(&rec, "position/world/r", 255, 1.0)?;
+    styling_cartesian(&rec, "position/world/r_n", 255, 1.0)?;
     styling_cartesian(&rec, "position/world/t", 100, 0.8)?;
     styling_cartesian(&rec, "velocity/world/v", 255, 1.0)?;
     styling_cartesian(&rec, "velocity/world/t", 100, 0.8)?;
@@ -39,6 +43,8 @@ pub fn plot_all_static(rec: &rerun::RecordingStream) -> Result<()> {
     styling_cartesian(&rec, "force/body/euler", 100, 0.8)?;
     styling_cartesian(&rec, "force/body/g", 100, 0.8)?;
     styling_cartesian(&rec, "force/body/u", 100, 0.8)?;
+    styling_cartesian(&rec, "acceleration/body/a", 255, 1.0)?;
+    styling_cartesian(&rec, "acceleration/body/a_n", 100, 0.8)?;
 
     Ok(())
 }
@@ -128,6 +134,34 @@ pub fn plot_all(
     Ok(())
 }
 
+pub fn plot_target(
+    rec: &rerun::RecordingStream,
+    target_attitude: &UnitQuaternion<f64>,
+    target_position: &Vector3<f64>,
+    target_rate: &Vector3<f64>,
+    t: f64,
+) -> Result<()> {
+    // Set timestep
+    rec.set_time_seconds("sim_time", t);
+
+    update_static_with_pose(
+        rec,
+        "3d/world/target_frame",
+        &target_attitude,
+        &target_position,
+    )?;
+
+    quaternion_parameters(rec, "q/t", &target_attitude)?;
+    {
+        let (roll, pitch, yaw) = target_attitude.euler_angles();
+        let a_t = Vector3::new(roll, pitch, yaw);
+        rotational(rec, "attitude/t", &a_t)?;
+    }
+    rotational(rec, "rate/t", target_rate)?;
+
+    Ok(())
+}
+
 pub fn plot_state(
     rec: &rerun::RecordingStream,
     state: &State,
@@ -167,7 +201,7 @@ pub fn plot_state(
 
 pub fn plot_measurments(
     rec: &rerun::RecordingStream,
-    pos: &Vector3<f64>,
+    pos: &Option<Vector3<f64>>,
     vel: &Vector3<f64>,
     accl: &Vector3<f64>,
     rate: &Vector3<f64>,
@@ -180,8 +214,10 @@ pub fn plot_measurments(
     rotational(rec, "rate/w_n", rate)?;
 
     // Plot translational components
-    cartesian(rec, "position/world/r_n", pos)?;
-    cartesian(rec, "velocity/world/v_n", vel)?;
+    match pos {
+        Some(pos) => cartesian(rec, "position/world/r_n", pos)?,
+        None => (),
+    };
     cartesian(rec, "acceleration/body/a_n", accl)?;
 
     Ok(())
@@ -191,6 +227,7 @@ pub fn plot_ukf(
     rec: &rerun::RecordingStream,
     q: &UnitQuaternion<f64>,
     r: &Vector3<f64>,
+    rate_bias: &Vector3<f64>,
     t: f64,
 ) -> Result<()> {
     // Set timestep

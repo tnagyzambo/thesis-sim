@@ -63,16 +63,20 @@ impl App {
         let mut controller_state = control::ControllerState::default();
         let mut motor_state = Vector4::<f64>::new(1500.0, 1500.0, 1500.0, 1500.0);
         let mut accl = Vector3::zeros();
-        let mut bias = Vector3::zeros();
+        let mut rate_bias = Vector3::zeros();
 
         for i in 0..n {
             let t = i as f64 * dt;
             plot::plot_state(&rec, &state, &accl, t)?;
 
             // MEASURE
-            let (noisy_pos, noisy_vel, noisy_accl, noisy_rate) =
-                measurement::measurment(&state, accl, &mut bias);
-            plot::plot_measurments(&rec, &noisy_pos, &noisy_vel, &noisy_accl, &noisy_rate, t)?;
+            let (noisy_accl, noisy_rate) = measurement::measurment(&state, accl, &mut rate_bias);
+            let noisy_pos = if (i % 3) == 0 {
+                Some(measurement::gps(&state))
+            } else {
+                None
+            };
+            plot::plot_measurments(&rec, &noisy_pos, &noisy_accl, &noisy_rate, t)?;
 
             // FILTER
             let filtered_state = ukf::ukf(
@@ -88,8 +92,8 @@ impl App {
             )?;
 
             // CONTROL
-            let (f_u, tau_u) = control::control(
-                &rec,
+            let (f_u, tau_u) =
+                control::control(&rec, &state, &mut controller_state, &mut motor_state, dt, t)?;
                 &filtered_state,
                 &mut controller_state,
                 &mut motor_state,
