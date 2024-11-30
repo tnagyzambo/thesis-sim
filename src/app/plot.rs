@@ -202,7 +202,6 @@ pub fn plot_state(
 pub fn plot_measurments(
     rec: &rerun::RecordingStream,
     pos: &Option<Vector3<f64>>,
-    vel: &Vector3<f64>,
     accl: &Vector3<f64>,
     rate: &Vector3<f64>,
     t: f64,

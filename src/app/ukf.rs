@@ -260,14 +260,13 @@ impl<const N: usize> ConstrainedAlgebra<Self, { N + 6 }> for MixedVector<N> {
 }
 
 type StateVector = MixedVector<6>;
-type StateVectorAugmented = MixedVector<12>;
 
 fn measurement_model(m: &Vector<9>, _u: &(), _dt: &()) -> UnitDualQuaternion {
     let a = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(0)).normalize();
     let b = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(3)).normalize();
     let r = SVector::<f64, 3>::from(m.0.fixed_rows::<3>(6));
 
-    let a_x = a[0];
+    let a_x = -a[0];
     let a_y = a[1];
     let a_z = a[2];
 
@@ -276,27 +275,20 @@ fn measurement_model(m: &Vector<9>, _u: &(), _dt: &()) -> UnitDualQuaternion {
         let lambda = ((a_z + 1.0) / 2.0).sqrt();
         let w = lambda;
         let ijk = SVector::<f64, 3>::from([-a_y / (2.0 * lambda), a_x / (2.0 * lambda), 0.0]);
-            a_x / (2.0 * (a_z + 1.0)).sqrt(),
-            0.0,
-        ]);
         Quaternion::from_parts(w, ijk)
     } else {
         let lambda = (2.0 * (1.0 - a_z)).sqrt();
         let w = -a_y / (2.0 * lambda);
         let ijk = SVector::<f64, 3>::from([lambda, 0.0, a_x / (2.0 * lambda)]);
-            0.0,
-            a_x / (2.0 * (1.0 - a_z)).sqrt(),
-        ]);
         Quaternion::from_parts(w, ijk)
     };
 
     let e_a = UnitQuaternion::from(q_a).0;
 
-    let l = e_a.conjugate() * b;
+    let l = e_a * b;
 
     let l_x = l[0];
     let l_y = l[1];
-    let l_z = l[2];
 
     // Switch case based on sign of l_x
     let gamma = l_x.powi(2) + l_y.powi(2);
@@ -315,8 +307,16 @@ fn measurement_model(m: &Vector<9>, _u: &(), _dt: &()) -> UnitDualQuaternion {
 
     let e_m = UnitQuaternion::from(q_m).0;
 
-    //let rotation = na::UnitQuaternion::from(e_a.0 * e_m.0);
-    let rotation = na::UnitQuaternion::from(e_a.0) * Q_INVERT;
+    let rotation = na::UnitQuaternion::new_normalize(Quaternion::new(
+        -(2.0_f64).sqrt() / 2.0,
+        0.0,
+        0.0,
+        (2.0_f64).sqrt() / 2.0,
+    )) * na::UnitQuaternion::new_normalize(super::state::q_product(
+        *e_a.quaternion(),
+        *e_m.quaternion(),
+    )) * Q_INVERT;
+    //let rotation = na::UnitQuaternion::from(e_a) * Q_INVERT;
 
     let r_body = rotation * r;
 
@@ -344,14 +344,13 @@ fn observation_model(x: &StateVector, _u: &(), _dt: &()) -> UnitDualQuaternion {
 /// * `w` - Measured gyroscopic rates [w_x; w_y; w_z] (rad/s)
 /// * `dt` - Timestep (s)
 ///
-fn process_model(x: &StateVectorAugmented, d: &SVector<f64, 6>, dt: &f64) -> StateVector {
+fn process_model(x: &StateVector, d: &SVector<f64, 6>, dt: &f64) -> StateVector {
     let w = d.fixed_rows::<3>(0);
     let a = d.fixed_rows::<3>(3);
 
     // Remove estimated bias and noise with gyroscope measurment model
     let rate_bias = x.euclidean().0.fixed_rows::<3>(3);
     let w = w - rate_bias;
-    let w = w - b - q;
 
     let v = x.euclidean().0.fixed_rows::<3>(0);
     let g = SVector::<f64, 3>::new(0.0, 0.0, -9.81);
@@ -478,7 +477,6 @@ where
 #[derive(Debug)]
 pub struct UkfState {
     q: SMatrix<f64, 12, 12>,
-    q2: SMatrix<f64, 12, 12>,
     r: SMatrix<f64, 9, 9>,
     x_kk1: StateVector,
     p_xx_kk1: SMatrix<f64, 12, 12>,
@@ -500,11 +498,6 @@ impl UkfState {
             0.00000000001,
             0.00000000001,
             0.00000000001,
-            0.0,
-            0.0,
-            0.001,
-            0.001,
-            0.001,
         ]));
 
         // Covariance matrix of measurment noise = diag([accelerometer_noise_3x1, magnetometer_noise_3x1, pos_noise_3x1])
@@ -522,7 +515,6 @@ impl UkfState {
 
         Self {
             q,
-            q2,
             r,
             x_kk1,
             p_xx_kk1,
@@ -533,7 +525,6 @@ impl UkfState {
 pub fn ukf(
     rec: &rerun::RecordingStream,
     pos: &Option<Vector3<f64>>,
-    vel: &Vector3<f64>,
     accl: &Vector3<f64>,
     rate: &Vector3<f64>,
     state: &State,
@@ -549,6 +540,15 @@ pub fn ukf(
         ) * 2.0)
             .imag(),
     };
+
+    //
+    // Measurement
+    //
+
+    // Measurment vector (m/s^2, guass)
+    let mag = state.attitude() * Vector3::<f64>::new(10.0, 0.0, 0.0); // TEMPORARY
+    let m = Vector::<9>::from([
+        accl[0], accl[1], accl[2], mag[0], mag[1], mag[2], pos[0], pos[1], pos[2],
     ]);
 
     // Gryoscopic rate vector (rad/s)
@@ -568,24 +568,14 @@ pub fn ukf(
         &(),
     )?;
 
+    // Measurment covariance update
+
     //
     // Forecast
     //
 
     // Gryoscopic rate vector (rad/s)
     let d = SVector::<f64, 6>::from([rate[0], rate[1], rate[2], accl[0], accl[1], accl[2]]);
-
-    // Predict the state and covariance via an unscented transformation of the state + covariance
-    let x_aug = StateVectorAugmented::from_components(ukf_state.x_kk1.dual_quaternion().clone(), e);
-
-    // Augmented state covariance matrix = diag([state_covariance_6x6, multiplacative_process_noise_covariance_3x3])
-    let mut p_xx_aug = SMatrix::<f64, 18, 18>::zeros();
-    p_xx_aug
-        .fixed_view_mut::<12, 12>(0, 0)
-        .copy_from(&ukf_state.p_xx_kk1);
-    p_xx_aug
-        .fixed_view_mut::<6, 6>(12, 12)
-        .copy_from(&ukf_state.q1);
 
     // Predict the state and covariance via an unscented transformation of the augmented state + covariance
     re_log::info!("proc {:?}", ukf_state);
@@ -617,33 +607,10 @@ pub fn ukf(
     )?;
 
     //
-    // Measurement
-    //
-
-    // Measurment vector (m/s^2, guass)
-    let mag = state.attitude() * Vector3::<f64>::new(10.0, 0.0, 0.0); // TEMPORARY
-    let m = Vector::<9>::from([
-        accl[0], accl[1], accl[2], mag[0], mag[1], mag[2], pos[0], pos[1], pos[2],
-    ]);
-
-    // Compute the attitude and covariance from the accelerometer measurement
-    let (y_k, r_k, _) = ut(
-        1.0,
-        0.01,
-        2.0,
-        measurement_model,
-        &m,
-        &ukf_state.r,
-        &(),
-        &(),
-    )?;
-
-    // Measurment covariance update
-    p_yy_kk1 += r_k;
-
-    //
     // Data assimilation
     //
+
+    p_yy_kk1 += r_k;
 
     // Kalman gain
     let p_yy_kk1_inv = p_yy_kk1

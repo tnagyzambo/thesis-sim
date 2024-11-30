@@ -82,7 +82,6 @@ impl App {
             let filtered_state = ukf::ukf(
                 &rec,
                 &noisy_pos,
-                &noisy_vel,
                 &noisy_accl,
                 &noisy_rate,
                 &state,
@@ -94,12 +93,6 @@ impl App {
             // CONTROL
             let (f_u, tau_u) =
                 control::control(&rec, &state, &mut controller_state, &mut motor_state, dt, t)?;
-                &filtered_state,
-                &mut controller_state,
-                &mut motor_state,
-                dt,
-                t,
-            )?;
 
             // INPUT
             let torques = vec![tau_u];
