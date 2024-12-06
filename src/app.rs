@@ -3,12 +3,12 @@ use na::{Vector3, Vector4};
 use nalgebra as na;
 use re_viewer::external::{eframe, egui, re_log};
 
-mod control;
-mod dynamics;
-mod measurement;
-mod plot;
-mod state;
-mod ukf;
+pub mod control;
+pub mod dynamics;
+pub mod measurement;
+pub mod plot;
+pub mod state;
+pub mod ukf;
 
 use state::{dq_exp, q_ln, Force, State, Torque, A, J, M, MOTOR_A, MOTOR_B, M_INV, Q_INVERT};
 
@@ -28,7 +28,7 @@ impl App {
     pub fn new(rerun_app: re_viewer::App) -> Self {
         Self {
             rerun_app,
-            duration: 0.2,
+            duration: 2.0,
             dt: 0.01,
             roll: 0.0,
             pitch: 0.0,
@@ -58,7 +58,7 @@ impl App {
             &self.omega,
         );
 
-        let mut ukf_state = ukf::UkfState::new();
+        let mut ukf_state = ukf::UkfState::new(*state.q.dual_quaternion());
 
         let mut controller_state = control::ControllerState::default();
         let mut motor_state = Vector4::<f64>::new(1500.0, 1500.0, 1500.0, 1500.0);
@@ -71,7 +71,7 @@ impl App {
 
             // MEASURE
             let (noisy_accl, noisy_rate) = measurement::measurment(&state, accl, &mut rate_bias);
-            let noisy_pos = if (i % 3) == 0 {
+            let noisy_pos = if (i % 20) == 0 {
                 Some(measurement::gps(&state))
             } else {
                 None
@@ -99,10 +99,10 @@ impl App {
             let mut forces = dynamics::ficticous_forces(&state);
             forces.push(dynamics::gravity(&state));
 
-            //if (1.2 >= t) && (t > 1.0) {
-            //    let disturbance = Force::new(Vector3::new(10.0, 10.0, 10.0), "dist".to_string());
-            //    forces.push(disturbance);
-            //}
+            if (1.2 >= t) && (t > 1.0) {
+                let disturbance = Force::new(Vector3::new(10.0, 10.0, 10.0), "dist".to_string());
+                forces.push(disturbance);
+            }
 
             accl = M_INV
                 * forces

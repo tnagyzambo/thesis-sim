@@ -3,6 +3,23 @@ name = "dual-quat"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+# The name of the native library. This is the name which will be used in Python to import the
+# library (i.e. `import string_sum`). If you change this, you must also change the name of the
+# `#[pymodule]` in `src/lib.rs`.
+name = "dual_quat"
+path = "src/lib.rs"
+# "cdylib" is necessary to produce a shared library for Python to import from.
+#
+# Downstream Rust code (including code in `bin/`, `examples/`, and `tests/`) will not be able
+# to `use string_sum;` unless the "rlib" or "lib" crate type is also included, e.g.:
+# crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "mybin"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.83"
 rand = "0.8.5"
@@ -16,3 +33,4 @@ re_viewer = "=0.18.2"
 mimalloc = "0.1.43"
 nalgebra = "0.33.2"
 tracing = "0.1.37"
+pyo3 = { version = "0.23.1", features = ["extension-module"] }

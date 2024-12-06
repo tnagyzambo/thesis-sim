@@ -39,7 +39,7 @@ pub fn measurment(
 
 pub fn gps(state: &State) -> Vector3<f64> {
     // GPS Position
-    let pos_normal = Normal::new(0.0, 0.5).unwrap();
+    let pos_normal = Normal::new(0.0, 0.25).unwrap();
     let pos_noise = Vector3::new(
         pos_normal.sample(&mut rand::thread_rng()),
         pos_normal.sample(&mut rand::thread_rng()),

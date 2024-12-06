@@ -35,6 +35,7 @@ pub fn plot_all_static(rec: &rerun::RecordingStream) -> Result<()> {
     styling_cartesian(&rec, "velocity/world/v", 255, 1.0)?;
     styling_cartesian(&rec, "velocity/world/t", 100, 0.8)?;
     styling_cartesian(&rec, "position/body/r", 255, 1.0)?;
+    styling_cartesian(&rec, "position/body/ukf", 255, 1.0)?;
     styling_cartesian(&rec, "position/body/t", 100, 0.8)?;
     styling_cartesian(&rec, "velocity/body/v", 255, 1.0)?;
     styling_cartesian(&rec, "velocity/body/t", 100, 0.8)?;

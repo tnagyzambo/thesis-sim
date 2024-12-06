@@ -3,6 +3,7 @@ use na::{
     UnitQuaternion, Vector3,
 };
 use nalgebra as na;
+use pyo3::prelude::*;
 
 const ROOT2: f64 = 1.4142135623730950488016887242096980785696718753769480731766797379;
 
@@ -142,6 +143,7 @@ impl Torque {
 //}
 
 #[derive(Clone, Debug, Default)]
+#[pyclass]
 pub struct State {
     pub q: UnitDualQuaternion<f64>,
     pub xi: DualQuaternion<f64>,
