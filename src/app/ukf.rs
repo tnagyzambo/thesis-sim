@@ -498,7 +498,7 @@ impl UkfState {
 
         // Covariance matrix of measurment noise = diag([accelerometer_noise_3x1, magnetometer_noise_3x1, pos_noise_3x1])
         let r = SMatrix::<f64, 9, 9>::from_diagonal(&SVector::<f64, 9>::from([
-            0.000015, 0.000015, 0.000015, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+            0.000015, 0.000015, 0.000015, 1.0, 1.0, 1.0, 0.1, 0.1, 0.1,
         ]));
 
         // State vector = [real_quaternion_vec_4x1; dual_quaternion_vec_4x1, gyroscope_rate_bias_3x1]

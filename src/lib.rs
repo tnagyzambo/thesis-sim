@@ -46,9 +46,9 @@ impl UkfState {
     pub fn new(accl: f64) -> Self {
         // Covariance matrix of additive process noise = diag([dual_quat_process_noise_3x1, pos_process_noise_3x1, vel_procces_noise_3x1, gyroscope_bias_3x1])
         let q = SMatrix::<f64, 12, 12>::from_diagonal(&SVector::<f64, 12>::from([
-            0.00000000001,
-            0.00000000001,
-            0.00000000001,
+            0.001,
+            0.001,
+            0.001,
             0.00000000001,
             0.00000000001,
             0.00000000001,
@@ -62,7 +62,7 @@ impl UkfState {
 
         // Covariance matrix of measurment noise = diag([accelerometer_noise_3x1, magnetometer_noise_3x1, pos_noise_3x1])
         let r = SMatrix::<f64, 9, 9>::from_diagonal(&SVector::<f64, 9>::from([
-            accl, accl, accl, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+            accl, accl, accl, 1.0, 1.0, 1.0, 0.1, 0.1, 0.1,
         ]));
 
         // State vector = [real_quaternion_vec_4x1; dual_quaternion_vec_4x1, gyroscope_rate_bias_3x1]
@@ -71,7 +71,7 @@ impl UkfState {
 
         // State covariance matrix = diag([rotation_vector_3x1, pos_vector_3x1, vel_vector_3x1, gyroscope_bias_3x1])
         let p_xx_kk1 = SMatrix::<f64, 12, 12>::from_diagonal(&SVector::<f64, 12>::from([
-            0.01, 0.01, 0.01, 1.0, 1.0, 1.0, 0.1, 0.1, 0.1, 0.001, 0.001, 0.001,
+            0.1, 0.1, 0.1, 1.0, 1.0, 1.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1,
         ]));
 
         Self {
